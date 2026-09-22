@@ -36,6 +36,12 @@ jobs:
       # шаг принимает лицензии, дальше AGP догружает платформу сам.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        # packages: '' обязателен. По умолчанию action ставит пакет 'tools',
+        # который из SDK удалён, sdkmanager падает с кодом 1 и роняет весь job.
+        # Лицензии action принимает и без пакетов, а нужные платформу и
+        # build-tools AGP догрузит сам.
+        with:
+          packages: ''
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
