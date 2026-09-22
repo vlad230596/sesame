@@ -14,6 +14,9 @@ interface BarrierDao {
     @Query("SELECT * FROM barrier ORDER BY orderIndex ASC")
     fun observeAll(): Flow<List<Barrier>>
 
+    @Query("SELECT COUNT(*) FROM barrier")
+    suspend fun count(): Int
+
     @Query("SELECT * FROM barrier WHERE id = :id")
     suspend fun byId(id: Long): Barrier?
 

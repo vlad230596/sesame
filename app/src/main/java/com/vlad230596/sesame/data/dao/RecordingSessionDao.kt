@@ -13,6 +13,17 @@ interface RecordingSessionDao {
     @Query("SELECT * FROM recording_session ORDER BY startedAt DESC")
     fun observeAll(): Flow<List<RecordingSession>>
 
+    /** Незавершённая сессия: на главном экране показывается её состояние (§4.3). */
+    @Query("SELECT * FROM recording_session WHERE endedAt IS NULL ORDER BY startedAt DESC LIMIT 1")
+    fun observeActive(): Flow<RecordingSession?>
+
+    @Query("SELECT * FROM recording_session WHERE id = :id")
+    suspend fun byId(id: Long): RecordingSession?
+
+    /** Отметить выгруженным после share sheet (§7). */
+    @Query("UPDATE recording_session SET shared = 1 WHERE id IN (:ids)")
+    suspend fun markShared(ids: List<Long>)
+
     /** Для кнопки «Поделиться непошаренным» в истории (§7). */
     @Query("SELECT * FROM recording_session WHERE shared = 0 AND endedAt IS NOT NULL")
     suspend fun unshared(): List<RecordingSession>

@@ -138,7 +138,11 @@ dependencies {
 
     // Hilt
     implementation(libs.hilt.android)
+    implementation(libs.androidx.hilt.navigation.compose)
     ksp(libs.hilt.compiler)
+
+    // Настройки (§4.6) — DataStore Preferences
+    implementation(libs.androidx.datastore.preferences)
 
     // Location
     implementation(libs.play.services.location)
