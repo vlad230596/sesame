@@ -243,10 +243,18 @@ private fun HomeContent(
                 onStartSession(label)
             },
             onDismiss = {
-                // §4.3: тап мимо кнопок запускает запись без метки — метку можно
-                // проставить позже в истории. Начать запись важнее, чем выбрать метку.
+                // Закрытие окна — это отмена, и ничего больше.
+                //
+                // §4.3 говорит «тап по любой другой области запускает запись без
+                // метки», и буквально так и было сделано. На устройстве это
+                // оказалось ловушкой: и тап мимо окна, и кнопка «Назад» — в
+                // Android универсальные жесты отмены, а здесь они запускали
+                // пятнадцатиминутную сессию. Запустить запись случайно легко,
+                // заметить это — нет.
+                //
+                // Намерение §4.3 («не заставлять выбирать метку») закрыто явной
+                // кнопкой «Начать без метки» внутри окна.
                 labelPickerVisible = false
-                onStartSession(SessionLabel.NONE)
             },
         )
     }
@@ -480,7 +488,15 @@ private fun SessionCard(
                 modifier = Modifier
                     .weight(1f)
                     .height(Dimens.MinTouchTarget),
-            ) { Text("Продлить +$extendMinutes") }
+            ) {
+                // maxLines и bodyMedium: на половине ширины строка «Продлить +15»
+                // в labelLarge переносилась и обрезалась по высоте кнопки.
+                Text(
+                    "Продлить +$extendMinutes",
+                    maxLines = 1,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             Button(
                 onClick = onStop,
                 modifier = Modifier
@@ -543,8 +559,7 @@ private fun SessionLabelDialog(onPick: (SessionLabel) -> Unit, onDismiss: () -> 
         SectionCard(contentPadding = Dimens.SpaceM) {
             Text("Метка сессии", style = MaterialTheme.typography.titleLarge)
             Text(
-                "Тап мимо окна запустит запись без метки — её можно будет " +
-                    "проставить в истории.",
+                "Метку можно не выбирать — её можно проставить позже в истории.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
