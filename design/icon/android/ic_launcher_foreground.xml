@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- res/drawable/ic_launcher_foreground.xml -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <group android:translateX="-1.25" android:translateY="-2">
+
+        <!-- стойка -->
+        <path
+            android:fillColor="#7C8C98"
+            android:pathData="M33.5,60 L42.5,60 L42.5,73.5 A4.5,4.5 0 0 1 33.5,73.5 Z" />
+
+        <!-- стрела, поднята на 32 градуса -->
+        <group android:rotation="-32" android:pivotX="38" android:pivotY="62">
+            <clip-path
+                android:name="arm"
+                android:pathData="M36.5,57.5 L79.5,57.5 A4.5,4.5 0 0 1 79.5,66.5 L36.5,66.5 A4.5,4.5 0 0 1 36.5,57.5 Z" />
+            <path android:fillColor="#26333D" android:pathData="M32,57.5 h6 v9 h-6 z" />
+            <path android:fillColor="#FFFFFF" android:pathData="M38,57.5 h11.5 v9 h-11.5 z" />
+            <path android:fillColor="#E23B2E" android:pathData="M49.5,57.5 h11.5 v9 h-11.5 z" />
+            <path android:fillColor="#FFFFFF" android:pathData="M61,57.5 h11.5 v9 h-11.5 z" />
+            <path android:fillColor="#E23B2E" android:pathData="M72.5,57.5 h11.5 v9 h-11.5 z" />
+        </group>
+
+        <!-- шарнир -->
+        <path
+            android:fillColor="#C3CFD7"
+            android:pathData="M32.5,62 a5.5,5.5 0 1 0 11,0 a5.5,5.5 0 1 0 -11,0 z" />
+        <path
+            android:fillColor="#26333D"
+            android:pathData="M36,62 a2,2 0 1 0 4,0 a2,2 0 1 0 -4,0 z" />
+    </group>
+</vector>

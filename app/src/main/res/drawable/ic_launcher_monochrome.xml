@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- res/drawable/ic_launcher_monochrome.xml — тематическая иконка Android 13+, цвет задаёт система. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108"
+    android:tint="#000000">
+
+    <group android:translateX="-1.25" android:translateY="-2">
+
+        <path
+            android:fillColor="#000000"
+            android:pathData="M33.5,60 L42.5,60 L42.5,73.5 A4.5,4.5 0 0 1 33.5,73.5 Z" />
+
+        <group android:rotation="-32" android:pivotX="38" android:pivotY="62">
+            <clip-path
+                android:name="armMono"
+                android:pathData="M36.5,57.5 L79.5,57.5 A4.5,4.5 0 0 1 79.5,66.5 L36.5,66.5 A4.5,4.5 0 0 1 36.5,57.5 Z" />
+            <path android:fillColor="#000000" android:pathData="M32,57.5 h19.33 v9 h-19.33 z" />
+            <path android:fillColor="#000000" android:pathData="M54.33,57.5 h13.34 v9 h-13.34 z" />
+            <path android:fillColor="#000000" android:pathData="M70.67,57.5 h13.33 v9 h-13.33 z" />
+        </group>
+
+        <path
+            android:fillColor="#000000"
+            android:pathData="M32.5,62 a5.5,5.5 0 1 0 11,0 a5.5,5.5 0 1 0 -11,0 z" />
+    </group>
+</vector>

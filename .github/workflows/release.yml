@@ -1,0 +1,121 @@
+name: Release
+
+# §10 ТЗ: тег v* — сборка assembleRelease и GitHub Release с APK.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# contents: write нужен только здесь — чтобы создать Release и приложить APK.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: assembleRelease + GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # compileSdk 36 (§3) может отсутствовать в образе раннера:
+      # шаг принимает лицензии, дальше AGP догружает платформу сам.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Derive version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Keystore кладём в RUNNER_TEMP, а не в рабочее дерево: так он физически
+      # не может попасть ни под один glob артефактов и ни в один git-статус.
+      - name: Decode keystore
+        env:
+          SESAME_KEYSTORE_B64: ${{ secrets.SESAME_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SESAME_KEYSTORE_B64}" ]; then
+            echo "::error::secret SESAME_KEYSTORE_B64 is empty or not set"
+            exit 1
+          fi
+          KEYSTORE_PATH="${RUNNER_TEMP}/sesame-release.jks"
+          umask 077
+          printf '%s' "${SESAME_KEYSTORE_B64}" | base64 --decode > "${KEYSTORE_PATH}"
+          if [ ! -s "${KEYSTORE_PATH}" ]; then
+            echo "::error::decoded keystore is empty — check base64 encoding of the secret"
+            exit 1
+          fi
+          chmod 600 "${KEYSTORE_PATH}"
+          echo "SESAME_KEYSTORE_PATH=${KEYSTORE_PATH}" >> "$GITHUB_ENV"
+
+      # Контракт с Gradle-проектом: параметры подписи читаются из окружения.
+      - name: Assemble release
+        env:
+          SESAME_KEYSTORE_PASSWORD: ${{ secrets.SESAME_KEYSTORE_PASSWORD }}
+          SESAME_KEY_ALIAS: ${{ secrets.SESAME_KEY_ALIAS }}
+          SESAME_KEY_PASSWORD: ${{ secrets.SESAME_KEY_PASSWORD }}
+        run: >-
+          ./gradlew --no-daemon assembleRelease
+          -PversionName=${{ steps.version.outputs.version }}
+          -PversionCode=${{ github.run_number }}
+
+      # Выполняется и при падении сборки: keystore не переживает job.
+      - name: Remove keystore
+        if: always()
+        run: |
+          KEYSTORE_PATH="${RUNNER_TEMP}/sesame-release.jks"
+          if [ -f "${KEYSTORE_PATH}" ]; then
+            shred -u "${KEYSTORE_PATH}" 2>/dev/null || rm -f "${KEYSTORE_PATH}"
+          fi
+          echo "keystore removed"
+
+      # Имя выходного файла AGP зависит от конфигурации Gradle-проекта,
+      # поэтому APK находим поиском и переименовываем сами — версия из тега.
+      - name: Collect APK
+        id: apk
+        run: |
+          set -euo pipefail
+          SRC="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' \
+                   ! -name '*unsigned*' | sort | head -n 1)"
+          if [ -z "${SRC}" ]; then
+            echo "::error::no signed APK found under app/build/outputs/apk/release"
+            find app/build/outputs -name '*.apk' || true
+            exit 1
+          fi
+          DEST_DIR="${RUNNER_TEMP}/release-artifacts"
+          mkdir -p "${DEST_DIR}"
+          DEST="${DEST_DIR}/sesame-${{ steps.version.outputs.version }}.apk"
+          cp "${SRC}" "${DEST}"
+          echo "path=${DEST}" >> "$GITHUB_OUTPUT"
+          echo "Release APK: $(basename "${DEST}") ($(du -h "${DEST}" | cut -f1))" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Сезам ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: ${{ steps.apk.outputs.path }}

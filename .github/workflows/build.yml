@@ -1,0 +1,51 @@
+name: Build check
+
+# §10 ТЗ: пуш в main — сборка и проверка компиляции.
+# Плюс проверка каждого pull request до слияния.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Минимальные права: этому workflow нужно только прочитать исходники.
+permissions:
+  contents: read
+
+# Новый пуш в ту же ветку/PR отменяет предыдущий незавершённый прогон.
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  assemble-debug:
+    name: assembleDebug
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Кеш зависимостей/build cache + отчёт по Gradle в summary прогона.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # На ubuntu-latest Android SDK предустановлен, но compileSdk 36 (§3)
+      # в образе может отсутствовать. Шаг принимает лицензии и ставит
+      # cmdline-tools, после чего AGP сам догружает недостающие платформы.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # gradlew, закоммиченный из Windows, приезжает без бита исполнения.
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Assemble debug
+        run: ./gradlew --no-daemon assembleDebug

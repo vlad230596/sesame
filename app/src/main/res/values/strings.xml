@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Сезам</string>
+
+    <!-- Вкладки главного экрана, §4.7 -->
+    <string name="tab_home">Главная</string>
+    <string name="tab_history">История</string>
+    <string name="tab_settings">Настройки</string>
+
+    <string name="home_placeholder">Главный экран. Кнопки шлагбаумов и интенсивная запись появятся здесь.</string>
+    <string name="history_placeholder">История меток и сессий записи появится здесь.</string>
+    <string name="settings_placeholder">Настройки шлагбаумов, таймера и сбора данных появятся здесь.</string>
+
+    <!-- Виджет, §4.2 -->
+    <string name="widget_label">Сезам: шлагбаумы</string>
+    <string name="widget_description">Открыть шлагбаум A или B и начать интенсивную запись.</string>
+    <string name="widget_barrier_a">Шлагбаум A</string>
+    <string name="widget_barrier_b">Шлагбаум B</string>
+    <string name="widget_record">Запись</string>
+
+    <!-- Уведомление сервиса, §9 -->
+    <string name="notification_channel_name">Сбор данных</string>
+    <string name="notification_channel_description">Постоянное минимальное уведомление фонового сбора данных.</string>
+    <string name="notification_collector_title">Сезам</string>
+    <string name="notification_collector_text">Сбор данных активен</string>
+</resources>

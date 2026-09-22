@@ -1,0 +1,51 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+.kotlin/
+
+# Local configuration
+local.properties
+*.local.properties
+
+# Signing material — must never reach the repository
+*.jks
+*.keystore
+*.p12
+*.pepk
+keystore.properties
+signing.properties
+
+# Android build artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+captures/
+release/
+output.json
+
+# IDE — Android Studio / IntelliJ
+.idea/*
+!.idea/codeStyles/
+!.idea/inspectionProfiles/
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+.idea/deploymentTargetDropDown.xml
+.idea/deploymentTargetSelector.xml
+*.iml
+*.ipr
+*.iws
+
+# Native / NDK
+.externalNativeBuild/
+.cxx/
+
+# OS noise
+.DS_Store
+Thumbs.db

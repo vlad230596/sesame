@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <!-- Сезам — передний план adaptive icon. Канва 108x108, безопасная зона — окружность r=33 от (54,54). -->
+  <defs>
+    <clipPath id="armClip">
+      <rect x="32" y="57.5" width="52" height="9" rx="4.5"/>
+    </clipPath>
+  </defs>
+  <g transform="translate(-1.25,-2)">
+    <!-- стойка -->
+    <path d="M33.5,60 L42.5,60 L42.5,73.5 A4.5,4.5 0 0 1 33.5,73.5 Z" fill="#7C8C98"/>
+    <!-- стрела, поднята на 32 градуса -->
+    <g transform="rotate(-32 38 62)">
+      <g clip-path="url(#armClip)">
+        <rect x="32" y="57.5" width="6" height="9" fill="#26333D"/>
+        <rect x="38" y="57.5" width="11.5" height="9" fill="#FFFFFF"/>
+        <rect x="49.5" y="57.5" width="11.5" height="9" fill="#E23B2E"/>
+        <rect x="61" y="57.5" width="11.5" height="9" fill="#FFFFFF"/>
+        <rect x="72.5" y="57.5" width="11.5" height="9" fill="#E23B2E"/>
+      </g>
+    </g>
+    <!-- шарнир -->
+    <circle cx="38" cy="62" r="5.5" fill="#C3CFD7"/>
+    <circle cx="38" cy="62" r="2" fill="#26333D"/>
+  </g>
+</svg>
