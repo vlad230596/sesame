@@ -90,10 +90,12 @@ jobs:
           SESAME_KEYSTORE_PASSWORD: ${{ secrets.SESAME_KEYSTORE_PASSWORD }}
           SESAME_KEY_ALIAS: ${{ secrets.SESAME_KEY_ALIAS }}
           SESAME_KEY_PASSWORD: ${{ secrets.SESAME_KEY_PASSWORD }}
+        # versionCode НЕ передаётся: Gradle выводит его из версии (см.
+        # app/build.gradle.kts). Номер прогона workflow с версией не связан, и
+        # APK из релиза мог оказаться «старее» уже установленного.
         run: >-
           ./gradlew --no-daemon assembleRelease
           -PversionName=${{ steps.version.outputs.version }}
-          -PversionCode=${{ github.run_number }}
 
       # Выполняется и при падении сборки: keystore не переживает job.
       - name: Remove keystore

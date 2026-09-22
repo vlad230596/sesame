@@ -39,8 +39,27 @@ val failReleaseWithoutKeystore: Boolean = runningInCi && sesameKeystoreFile == n
  */
 val sesameVersionName: String =
     (findProperty("versionName") as String?)?.takeIf { it.isNotBlank() } ?: "0.1.0"
-val sesameVersionCode: Int =
-    (findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+
+/**
+ * versionCode выводится ИЗ ВЕРСИИ, а не из счётчика прогонов CI.
+ *
+ * Счётчик прогонов казался проще, но он не связан с версией: локальная сборка и
+ * сборка из CI получали несопоставимые коды, и APK из релиза мог отказаться
+ * ставиться поверх уже установленного с формулировкой про понижение версии.
+ * Пересоздание репозитория или сброс счётчика ломали бы это так же.
+ *
+ * major * 1_000_000 + minor * 1_000 + patch: монотонно растёт вместе с semver,
+ * оставляет по 999 значений на minor и patch и не переполняет Int до major 2147.
+ * Суффикс предрелиза (0.3.0-rc.1) на код не влияет — он метка, а не порядок.
+ */
+val sesameVersionCode: Int = (findProperty("versionCode") as String?)?.toIntOrNull()
+    ?: run {
+        val parts = sesameVersionName.substringBefore('-').split('.')
+        val major = parts.getOrNull(0)?.toIntOrNull() ?: 0
+        val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        val patch = parts.getOrNull(2)?.toIntOrNull() ?: 0
+        major * 1_000_000 + minor * 1_000 + patch
+    }
 
 android {
     namespace = "com.vlad230596.sesame"
