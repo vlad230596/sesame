@@ -62,7 +62,9 @@ import com.vlad230596.sesame.ui.common.formatDuration
 import com.vlad230596.sesame.ui.common.plural
 import com.vlad230596.sesame.ui.common.title
 import com.vlad230596.sesame.ui.permissions.PermissionsScreen
+import com.vlad230596.sesame.ui.theme.BarrierAccent
 import com.vlad230596.sesame.ui.theme.Dimens
+import com.vlad230596.sesame.ui.theme.SesameAccentColors
 import com.vlad230596.sesame.ui.theme.SesameTheme
 
 /**
@@ -165,13 +167,21 @@ private fun HomeContent(
                 )
             }
 
-            state.barriers.forEach { barrier ->
+            // Цвет закреплён за позицией кнопки, а не за id шлагбаума: верхняя
+            // всегда одна и та же, и именно это запоминает рука за рулём.
+            state.barriers.forEachIndexed { index, barrier ->
+                val accent = SesameAccentColors.current.barrier(index)
                 val countdown = state.countdown?.takeIf { it.barrierId == barrier.id }
                 if (countdown != null) {
-                    CountdownCard(countdown = countdown, onCancel = onCancelCountdown)
+                    CountdownCard(
+                        countdown = countdown,
+                        accent = accent,
+                        onCancel = onCancelCountdown,
+                    )
                 } else {
                     BarrierButton(
                         barrier = barrier,
+                        accent = accent,
                         immediate = state.settings.cancelTimeoutSeconds == 0,
                         onClick = { onBarrierPressed(barrier) },
                     )
@@ -321,8 +331,18 @@ private fun UnconfirmedBanner(count: Int, onOpen: () -> Unit) {
     }
 }
 
+/**
+ * Кнопка открытия. Цвет берётся не из схемы, а из [BarrierAccent]: в схеме лежит
+ * нейтральная сталь, и если красить кнопку от `primary`, красным станет весь
+ * интерфейс, а две кнопки окажутся неразличимы между собой.
+ */
 @Composable
-private fun BarrierButton(barrier: Barrier, immediate: Boolean, onClick: () -> Unit) {
+private fun BarrierButton(
+    barrier: Barrier,
+    accent: BarrierAccent,
+    immediate: Boolean,
+    onClick: () -> Unit,
+) {
     Button(
         onClick = onClick,
         modifier = Modifier
@@ -330,8 +350,8 @@ private fun BarrierButton(barrier: Barrier, immediate: Boolean, onClick: () -> U
             .height(Dimens.BarrierButtonHeight),
         shape = MaterialTheme.shapes.large,
         colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
+            containerColor = accent.container,
+            contentColor = accent.onContainer,
         ),
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -348,20 +368,33 @@ private fun BarrierButton(barrier: Barrier, immediate: Boolean, onClick: () -> U
     }
 }
 
-/** Состояние обратного отсчёта занимает место самой кнопки — экран не прыгает. */
+/**
+ * Состояние обратного отсчёта занимает место самой кнопки — экран не прыгает.
+ * Цвет тоже остаётся от кнопки: отсчёт идёт по конкретному шлагбауму, и на
+ * экране должно быть видно по какому, не вчитываясь в подпись.
+ */
 @Composable
-private fun CountdownCard(countdown: CountdownState, onCancel: () -> Unit) {
-    SectionCard(containerColor = MaterialTheme.colorScheme.primaryContainer) {
+private fun CountdownCard(
+    countdown: CountdownState,
+    accent: BarrierAccent,
+    onCancel: () -> Unit,
+) {
+    SectionCard(
+        containerColor = accent.container,
+        contentColor = accent.onContainer,
+    ) {
         Text(
             "${countdown.barrierLabel}: звоним через ${countdown.remainingSeconds}…",
             style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            color = accent.onContainer,
         )
         LinearProgressIndicator(
             progress = { countdown.progress },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(Dimens.SpaceS),
+            color = accent.onContainer,
+            trackColor = accent.onContainer.copy(alpha = 0.3f),
         )
         Button(
             onClick = onCancel,
@@ -421,6 +454,8 @@ private fun SessionCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(Dimens.SpaceS),
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            trackColor = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.3f),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
             OutlinedButton(
@@ -536,6 +571,42 @@ private fun HomePreview() {
                         source = com.vlad230596.sesame.data.LabelSource.WIDGET,
                         outcome = com.vlad230596.sesame.data.CallOutcome.CALLED,
                     ),
+                ),
+                lastEventAt = System.currentTimeMillis() - 8 * 60_000,
+                usedBytes = 1_400_000_000,
+                serviceRunning = true,
+            ),
+            onBarrierPressed = {},
+            onCancelCountdown = {},
+            onStartSession = {},
+            onExtendSession = {},
+            onStopSession = {},
+            onStartService = {},
+            onStopService = {},
+            onDirection = { _, _ -> },
+            onMode = { _, _ -> },
+            onDiscarded = { _, _ -> },
+            onNote = { _, _ -> },
+            onConfirmAll = {},
+            onMessageShown = {},
+        )
+    }
+}
+
+/**
+ * Светлая схема. Смысловые цвета кнопок в ней те же самые — проверяется, что
+ * нейтральная механика (чипы, второстепенные кнопки, прогресс) не уехала в
+ * красный и на светлом конце шкалы.
+ */
+@Preview(showBackground = true, heightDp = 1000)
+@Composable
+private fun HomeLightPreview() {
+    SesameTheme(darkTheme = false) {
+        HomeContent(
+            state = HomeUiState(
+                barriers = listOf(
+                    Barrier(id = 1, label = "Шлагбаум A", phoneNumber = "+7 900 000-00-00", lat = null, lon = null),
+                    Barrier(id = 2, label = "Шлагбаум B", phoneNumber = null, lat = null, lon = null),
                 ),
                 lastEventAt = System.currentTimeMillis() - 8 * 60_000,
                 usedBytes = 1_400_000_000,

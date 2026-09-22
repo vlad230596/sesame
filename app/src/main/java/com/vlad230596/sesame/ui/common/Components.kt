@@ -17,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,17 +33,27 @@ import com.vlad230596.sesame.ui.theme.Dimens
  * по отдельности, выглядели как одно приложение.
  */
 
+/**
+ * [contentColor] задаётся явно, потому что `contentColorFor` умеет выводить его
+ * только из ролей схемы. Карточка, покрашенная смысловым цветом из
+ * [com.vlad230596.sesame.ui.theme.SesameAccentColors], в этот список не попадает,
+ * и текст в ней молча унаследовал бы цвет снаружи — вплоть до чёрного.
+ */
 @Composable
 fun SectionCard(
     modifier: Modifier = Modifier,
     title: String? = null,
     containerColor: Color = MaterialTheme.colorScheme.surface,
+    contentColor: Color = contentColorFor(containerColor),
     contentPadding: androidx.compose.ui.unit.Dp = Dimens.SpaceM,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = containerColor),
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+        ),
     ) {
         Column(
             modifier = Modifier.padding(contentPadding),
