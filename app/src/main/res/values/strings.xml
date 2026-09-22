@@ -23,4 +23,5 @@
     <string name="notification_channel_description">Постоянное минимальное уведомление фонового сбора данных.</string>
     <string name="notification_collector_title">Сезам</string>
     <string name="notification_collector_text">Сбор данных активен</string>
+    <string name="notification_collector_recording">Интенсивная запись</string>
 </resources>

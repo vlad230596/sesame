@@ -32,6 +32,15 @@
     <!-- §8. Экран отключения оптимизации батареи -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!--
+        §4.3, §12.3. Интенсивная сессия держит PARTIAL_WAKE_LOCK: foreground service
+        сам по себе не мешает системе усыпить процессор, а не-wakeup датчики при
+        засыпании перестают доставлять отсчёты, и 15 минут при погашенном экране
+        не записались бы полностью. Пассивный слой wake lock не берёт — там ту же
+        задачу решает аппаратная пакетная передача.
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- §3. Отсутствие любого датчика не является ошибкой -->
     <uses-feature
         android:name="android.hardware.sensor.accelerometer"

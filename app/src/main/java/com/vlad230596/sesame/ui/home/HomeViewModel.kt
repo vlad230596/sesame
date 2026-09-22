@@ -13,13 +13,14 @@ import com.vlad230596.sesame.data.Direction
 import com.vlad230596.sesame.data.LabelSource
 import com.vlad230596.sesame.data.PassageLabelRepository
 import com.vlad230596.sesame.data.SessionLabel
+import com.vlad230596.sesame.data.StorageUsageRepository
 import com.vlad230596.sesame.data.TravelMode
 import com.vlad230596.sesame.data.dao.LogEventDao
-import com.vlad230596.sesame.data.dao.RecordingSessionDao
 import com.vlad230596.sesame.data.entity.Barrier
 import com.vlad230596.sesame.data.entity.PassageLabel
 import com.vlad230596.sesame.data.prefs.SesameSettings
 import com.vlad230596.sesame.data.prefs.SettingsRepository
+import com.vlad230596.sesame.logging.CollectorHeartbeat
 import com.vlad230596.sesame.service.CollectorService
 import com.vlad230596.sesame.session.ActiveSession
 import com.vlad230596.sesame.session.RecordingSessionController
@@ -93,7 +94,8 @@ class HomeViewModel @Inject constructor(
     private val callBarrier: CallBarrierUseCase,
     private val permissionsChecker: PermissionsChecker,
     logEventDao: LogEventDao,
-    sessionDao: RecordingSessionDao,
+    heartbeat: CollectorHeartbeat,
+    storageUsage: StorageUsageRepository,
 ) : ViewModel() {
 
     /** Часть состояния, которой нет в базе: таймер, часы, разрешения, сообщение. */
@@ -114,10 +116,18 @@ class HomeViewModel @Inject constructor(
         settingsRepository.settings,
         sessions.active,
         passageLabels.observeUnconfirmed(),
+        // «Последнее фоновое событие» (§4.7) — это максимум из журнала событий и
+        // момента, когда поток записи последний раз положил на диск отсчёт
+        // датчика: ночью в покое журнал молчит часами при совершенно живом сборе.
+        // Занятый объём считается по файлам, а не по сумме sizeBytes в Room —
+        // пассивного слоя в Room нет вовсе (§7).
         combine(
             logEventDao.observeLastReceivedTime(),
-            sessionDao.observeTotalSizeBytes(),
-        ) { lastEvent, size -> lastEvent to size },
+            heartbeat.lastSampleAt,
+            storageUsage.observeUsedBytes(),
+        ) { lastEvent, lastSample, size ->
+            maxOf(lastEvent ?: 0L, lastSample ?: 0L).takeIf { it > 0L } to size
+        },
     ) { barriers, settings, session, unconfirmed, (lastEvent, size) ->
         HomeUiState(
             barriers = barriers,
@@ -285,7 +295,11 @@ class HomeViewModel @Inject constructor(
     }
 
     /**
-     * Жёсткий предохранитель (§4.3): сессия не может идти дольше запланированного.
+     * Вторая линия жёсткого предохранителя (§4.3). Первая и главная — сторож в
+     * [CollectorService]: он живёт, пока живёт сбор, а не пока открыт экран.
+     * Здесь остановка дублируется на случай, когда сервис по какой-то причине не
+     * поднялся, а экран открыт: увидеть на главном экране бесконечно идущую
+     * запись хуже, чем остановить её дважды.
      *
      * Запоминаем последнюю остановленную сессию: пока на состояние никто не
      * подписан, [state] отдаёт последнее значение, и без этой защиты тикер
