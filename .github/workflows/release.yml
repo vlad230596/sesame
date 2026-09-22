@@ -1,10 +1,13 @@
 name: Release
 
-# §10 ТЗ: тег v* — сборка assembleRelease и GitHub Release с APK.
+# §10 ТЗ: тег версии — сборка assembleRelease и GitHub Release с APK.
+# Semantic Versioning БЕЗ префикса v (см. docs/VERSIONING.md), поэтому теги
+# начинаются с цифры: 0.2.0, 1.0.0-rc.1. Тег вида v0.2.0 этот workflow
+# намеренно не запускает.
 on:
   push:
     tags:
-      - 'v*'
+      - '[0-9]*.[0-9]*.[0-9]*'
 
 # contents: write нужен только здесь — чтобы создать Release и приложить APK.
 permissions:
@@ -51,9 +54,14 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
+          # Тег И ЕСТЬ версия: никакого срезания префикса. Если тег не semver,
+          # падаем здесь, а не выкладываем релиз со странным именем файла.
+          if ! printf '%s' "${TAG}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::тег '${TAG}' не является semver без префикса v (см. docs/VERSIONING.md)"
+            exit 1
+          fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG}" >> "$GITHUB_OUTPUT"
 
       # Keystore кладём в RUNNER_TEMP, а не в рабочее дерево: так он физически
       # не может попасть ни под один glob артефактов и ни в один git-статус.

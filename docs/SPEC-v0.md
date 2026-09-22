@@ -361,8 +361,10 @@ CSV выбран вместо NDJSON: на 900+ отсчётах в секунд
 
 - Сборка: `./gradlew assembleRelease`, локально и в GitHub Actions.
 - Репозиторий: `github.com/vlad230596/sesame`.
-- Workflow: пуш в `main` — сборка и проверка компиляции; тег `v*` — сборка и
+- Workflow: пуш в `main` — сборка и проверка компиляции; тег версии — сборка и
   GitHub Release с APK.
+- Версии — Semantic Versioning **без префикса `v`**: тег `0.2.0`, не `v0.2.0`.
+  Подробности и обоснование в [VERSIONING.md](VERSIONING.md).
 
 **Подпись.** Сборка подписывается **постоянным keystore**, который хранится в
 GitHub Secrets в виде base64, пароль — там же. Копия keystore передаётся владельцу
