@@ -23,81 +23,102 @@ import javax.inject.Singleton
  *        отвалилось».
  * @param separateStep запрашивается отдельным шагом после базовой локации
  *        (`ACCESS_BACKGROUND_LOCATION`, §8: «Разрешить всегда»).
+ * @param code короткое системное имя разрешения для списка «выдано». Показывается
+ *        моноширинным рядом с человеческой подписью: через месяц по скриншоту
+ *        экрана надо понимать, о каком именно разрешении Android идёт речь, —
+ *        а «Устройства поблизости» и `BLUETOOTH_CONNECT` связаны неочевидно.
+ * @param currently что система показывает вместо выданного состояния. Нужна
+ *        только там, где «не выдано» — это не пусто, а другой режим.
  */
 data class PermissionSpec(
     val permission: String,
     val title: String,
     val reason: String,
+    val code: String,
     val runtime: Boolean = true,
     val separateStep: Boolean = false,
+    val currently: String? = null,
 )
 
 /** Таблица §8 в том же порядке. */
 val SesamePermissions: List<PermissionSpec> = listOf(
     PermissionSpec(
         permission = Manifest.permission.CALL_PHONE,
-        title = "Звонки",
+        title = "Звонки без подтверждения",
         reason = "звонок шлагбауму без экрана набора",
+        code = "CALL_PHONE",
     ),
     PermissionSpec(
         permission = Manifest.permission.ACCESS_FINE_LOCATION,
-        title = "Точная локация",
+        title = "Точная геолокация",
         reason = "локация и геофенсы",
+        code = "FINE_LOCATION",
     ),
     PermissionSpec(
         permission = Manifest.permission.ACCESS_COARSE_LOCATION,
-        title = "Примерная локация",
+        title = "Примерная геолокация",
         reason = "локация и SSID Wi-Fi",
+        code = "COARSE_LOCATION",
     ),
     PermissionSpec(
         permission = Manifest.permission.ACCESS_BACKGROUND_LOCATION,
-        title = "Локация в фоне",
+        title = "Геолокация всегда",
         reason = "геофенсы и сбор при свёрнутом приложении. Выдаётся отдельно: " +
             "в системном диалоге нужно выбрать «Разрешить всегда»",
+        code = "BACKGROUND_LOCATION",
         separateStep = true,
+        currently = "только при использовании",
     ),
     PermissionSpec(
         permission = Manifest.permission.ACTIVITY_RECOGNITION,
-        title = "Распознавание активности",
+        title = "Физическая активность",
         reason = "переходы IN_VEHICLE / ON_FOOT / STILL в журнале",
+        code = "ACTIVITY",
     ),
     PermissionSpec(
         permission = Manifest.permission.POST_NOTIFICATIONS,
         title = "Уведомления",
         reason = "уведомление постоянного сервиса сбора",
+        code = "POST_NOTIF",
     ),
     PermissionSpec(
         permission = Manifest.permission.BLUETOOTH_CONNECT,
-        title = "Bluetooth",
+        title = "Устройства поблизости",
         reason = "имена подключаемых устройств: магнитола — сильнейший признак «я в машине»",
+        code = "BT_CONNECT",
     ),
     PermissionSpec(
         permission = Manifest.permission.READ_PHONE_STATE,
         title = "Состояние телефона",
         reason = "список звонящих аккаунтов при двух SIM",
+        code = "PHONE_STATE",
     ),
     PermissionSpec(
         permission = Manifest.permission.FOREGROUND_SERVICE,
         title = "Foreground service",
         reason = "постоянный сервис сбора",
+        code = "FGS",
         runtime = false,
     ),
     PermissionSpec(
         permission = Manifest.permission.FOREGROUND_SERVICE_LOCATION,
         title = "Foreground service: локация",
         reason = "сервис с типом location",
+        code = "FGS_LOCATION",
         runtime = false,
     ),
     PermissionSpec(
         permission = Manifest.permission.ACCESS_WIFI_STATE,
         title = "Состояние Wi-Fi",
         reason = "SSID подключённой сети",
+        code = "WIFI_STATE",
         runtime = false,
     ),
     PermissionSpec(
         permission = Manifest.permission.RECEIVE_BOOT_COMPLETED,
         title = "Автозапуск после перезагрузки",
         reason = "поднять сервис после перезагрузки устройства",
+        code = "BOOT_COMPLETED",
         runtime = false,
     ),
 )

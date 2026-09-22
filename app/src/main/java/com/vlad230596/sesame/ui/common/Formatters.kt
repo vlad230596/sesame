@@ -42,6 +42,24 @@ fun formatDayHeader(epochMillis: Long, now: Long = System.currentTimeMillis()): 
 }
 
 /**
+ * «сегодня 18:42» — день и время в одной строке, для шапки правки метки.
+ *
+ * День словом, а не датой: правят метку почти всегда в тот же день или на
+ * следующий, и «сегодня» отвечает на вопрос быстрее, чем «22 сентября».
+ */
+fun formatDayTime(epochMillis: Long, now: Long = System.currentTimeMillis()): String {
+    val day = formatDayHeader(epochMillis, now)
+    val separator = if (day.first().isDigit()) ", " else " "
+    return day.replaceFirstChar { it.lowercase() } + separator + formatTime(epochMillis)
+}
+
+/** Координата для экрана шлагбаума и дома. Пять знаков — это ~1 м. */
+fun formatCoordinate(lat: Double?, lon: Double?): String? {
+    if (lat == null || lon == null) return null
+    return "%.5f, %.5f".format(Locale.ROOT, lat, lon)
+}
+
+/**
  * «N минут назад» для строки последнего фонового события (§4.7). Это главный
  * индикатор того, что сбор не умер, поэтому давность показывается словами,
  * а не временем: «14:02» ничего не говорит, пока не посмотришь на часы.
@@ -91,9 +109,6 @@ fun formatDuration(millis: Long): String {
         else -> "%d:%02d".format(minutes, seconds)
     }
 }
-
-fun formatMinutes(minutes: Int): String =
-    "$minutes ${plural(minutes.toLong(), "минута", "минуты", "минут")}"
 
 /**
  * Объём для строки «занято 2,3 из 10 ГБ».

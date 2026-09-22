@@ -188,6 +188,62 @@ object SesameIcons {
         }
     }
 
+    /** Стрелка «назад» в шапке вложенного экрана. */
+    val ChevronLeft: ImageVector by lazy {
+        stroked(size = 16f) {
+            moveTo(10f, 3f)
+            lineTo(5f, 8f)
+            lineToRelative(5f, 5f)
+        }
+    }
+
+    /** «Добавить метку задним числом». */
+    val Plus: ImageVector by lazy {
+        stroked(size = 24f) {
+            moveTo(12f, 5f)
+            verticalLineToRelative(14f)
+            moveTo(5f, 12f)
+            horizontalLineToRelative(14f)
+        }
+    }
+
+    /** «Экспорт в архив»: стрелка вниз на подставку. */
+    val Export: ImageVector by lazy {
+        stroked(size = 24f) {
+            moveTo(12f, 4f)
+            verticalLineToRelative(11f)
+            moveTo(8f, 11f)
+            lineToRelative(4f, 4f)
+            lineToRelative(4f, -4f)
+            moveTo(5f, 19f)
+            horizontalLineToRelative(14f)
+        }
+    }
+
+    /** Галочка «выдано». */
+    val Check: ImageVector by lazy {
+        stroked(size = 24f, strokeWidth = 2.4f) {
+            moveTo(5f, 12.5f)
+            lineToRelative(4.5f, 4.5f)
+            lineTo(19f, 7.5f)
+        }
+    }
+
+    /** «Показать номер». */
+    val Eye: ImageVector by lazy {
+        stroked(size = 24f) {
+            moveTo(2.5f, 12f)
+            curveToRelative(0f, 0f, 3.5f, -6.5f, 9.5f, -6.5f)
+            reflectiveCurveToRelative(9.5f, 6.5f, 9.5f, 6.5f)
+            reflectiveCurveToRelative(-3.5f, 6.5f, -9.5f, 6.5f)
+            reflectiveCurveTo(2.5f, 12f, 2.5f, 12f)
+            close()
+            moveTo(9.2f, 12f)
+            arcToRelative(2.8f, 2.8f, 0f, true, true, 5.6f, 0f)
+            arcToRelative(2.8f, 2.8f, 0f, true, true, -5.6f, 0f)
+        }
+    }
+
     /** Предупреждение: не хватает разрешений. */
     val Alert: ImageVector by lazy {
         stroked(size = 24f) {

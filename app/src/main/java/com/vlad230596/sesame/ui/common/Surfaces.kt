@@ -50,6 +50,11 @@ fun SesameSurface(
     corner: Dp = Dimens.CardCorner,
     contentColor: Color = Palette.TextPrimary,
     onClick: (() -> Unit)? = null,
+    // Выравнивание содержимого внутри поверхности. Нужно кнопке: она бывает и
+    // растянутой на всю ширину, и по размеру подписи, и центрировать текст
+    // изнутри — через `fillMaxSize` — нельзя: в `Row` такой ребёнок забирает всю
+    // оставшуюся ширину и вытесняет соседей в ноль.
+    contentAlignment: Alignment = Alignment.TopStart,
     content: @Composable () -> Unit,
 ) {
     val shape = RoundedCornerShape(corner)
@@ -59,7 +64,7 @@ fun SesameSurface(
     if (borderWidth > 0.dp) box = box.border(borderWidth, borderColor, shape)
     if (onClick != null) box = box.clickable(onClick = onClick)
 
-    Box(box) {
+    Box(box, contentAlignment = contentAlignment) {
         CompositionLocalProvider(LocalContentColor provides contentColor) { content() }
     }
 }

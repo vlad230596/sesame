@@ -74,7 +74,8 @@ data class HomeUiState(
     val message: String? = null,
 ) {
     val unconfirmedCount: Int get() = unconfirmed.size
-    fun barrierLabel(id: Long?): String? = barriers.firstOrNull { it.id == id }?.label
+    fun barrierLabel(id: Long?): String? =
+        barriers.firstOrNull { it.id == id }?.displayName
 }
 
 /**
@@ -198,7 +199,7 @@ class HomeViewModel @Inject constructor(
             it.copy(
                 countdown = CountdownState(
                     barrierId = barrier.id,
-                    barrierLabel = barrier.label,
+                    barrierLabel = barrier.displayName,
                     totalMillis = total,
                     remainingMillis = total,
                 ),

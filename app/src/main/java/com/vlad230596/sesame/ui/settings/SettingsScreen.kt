@@ -1,491 +1,561 @@
 package com.vlad230596.sesame.ui.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vlad230596.sesame.data.entity.Barrier
-import com.vlad230596.sesame.data.prefs.LocationPriority
 import com.vlad230596.sesame.data.prefs.SesameSettings
-import com.vlad230596.sesame.ui.common.ChipRow
-import com.vlad230596.sesame.ui.common.SectionCard
-import com.vlad230596.sesame.ui.common.SectionTitle
-import com.vlad230596.sesame.ui.common.SettingTextField
+import com.vlad230596.sesame.ui.common.CardHeadRow
+import com.vlad230596.sesame.ui.common.FootNote
+import com.vlad230596.sesame.ui.common.GroupCaption
+import com.vlad230596.sesame.ui.common.GroupDivider
+import com.vlad230596.sesame.ui.common.GroupRow
+import com.vlad230596.sesame.ui.common.NavGroupRow
+import com.vlad230596.sesame.ui.common.SegmentedRow
+import com.vlad230596.sesame.ui.common.SesameIcons
+import com.vlad230596.sesame.ui.common.SesameSurface
+import com.vlad230596.sesame.ui.common.SettingsGroup
+import com.vlad230596.sesame.ui.common.StatusDot
+import com.vlad230596.sesame.ui.common.StepperRow
 import com.vlad230596.sesame.ui.common.SubScreenScaffold
 import com.vlad230596.sesame.ui.common.TabHeader
-import com.vlad230596.sesame.ui.common.formatMinutes
+import com.vlad230596.sesame.ui.common.ThinProgress
+import com.vlad230596.sesame.ui.common.Tones
+import com.vlad230596.sesame.ui.common.formatBytes
+import com.vlad230596.sesame.ui.common.maskPhone
 import com.vlad230596.sesame.ui.permissions.PermissionsScreen
 import com.vlad230596.sesame.ui.theme.Dimens
+import com.vlad230596.sesame.ui.theme.Palette
+import com.vlad230596.sesame.ui.theme.SesameAccentColors
+import com.vlad230596.sesame.ui.theme.SesameText
 import com.vlad230596.sesame.ui.theme.SesameTheme
-import kotlin.math.roundToInt
 
 /** Вложенные экраны настроек (§4.6). */
-private enum class SettingsRoute { ROOT, COLLECTION, PERMISSIONS }
+private sealed interface SettingsRoute {
+    data object Root : SettingsRoute
+    data object Collection : SettingsRoute
+    data object Permissions : SettingsRoute
+    data object Home : SettingsRoute
+    data class BarrierEdit(val barrierId: Long) : SettingsRoute
+}
 
 /**
- * Вкладка «Настройки» (§4.6).
+ * Вкладка «Настройки» (§4.6), по утверждённому макету.
  *
- * Два вложенных экрана — «Параметры сбора» и «Разрешения» — живут состоянием
- * внутри вкладки: NavHost ради двух переходов не окупается, а нижняя навигация
- * при этом остаётся на месте.
+ * Корневой экран — только список: что настроено и куда зайти. Формы вынесены на
+ * вложенные экраны, потому что форма шлагбаума это семь полей, и в общем списке
+ * она превращала экран в простыню, по которой нельзя пробежать глазами.
+ *
+ * Вложенные экраны живут состоянием внутри вкладки: NavHost ради четырёх
+ * переходов не окупается, а нижняя навигация при этом остаётся на месте.
  */
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
     val viewModel: SettingsViewModel = hiltViewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var route by rememberSaveable { mutableStateOf(SettingsRoute.ROOT) }
+    // Маршрут переживает поворот экрана и смерть процесса: править номер
+    // шлагбаума с открытой клавиатурой и вылететь из-за этого в корень настроек —
+    // ровно тот случай, ради которого rememberSaveable и существует.
+    //
+    // Кодируется одним Long: id шлагбаума положителен всегда (Room раздаёт их
+    // с единицы), поэтому ноль и отрицательные значения свободны под остальные
+    // экраны.
+    var route by rememberSaveable(
+        stateSaver = androidx.compose.runtime.saveable.Saver(
+            save = {
+                when (it) {
+                    SettingsRoute.Root -> 0L
+                    SettingsRoute.Collection -> -1L
+                    SettingsRoute.Permissions -> -2L
+                    SettingsRoute.Home -> -3L
+                    is SettingsRoute.BarrierEdit -> it.barrierId
+                }
+            },
+            restore = {
+                when (it) {
+                    0L -> SettingsRoute.Root
+                    -1L -> SettingsRoute.Collection
+                    -2L -> SettingsRoute.Permissions
+                    -3L -> SettingsRoute.Home
+                    else -> SettingsRoute.BarrierEdit(it)
+                }
+            },
+        ),
+    ) { mutableStateOf<SettingsRoute>(SettingsRoute.Root) }
+
+    val context = LocalContext.current
 
     LifecycleResumeEffect(Unit) {
         viewModel.refresh()
         onPauseOrDispose { }
     }
 
-    BackHandler(enabled = route != SettingsRoute.ROOT) { route = SettingsRoute.ROOT }
+    // Share sheet поднимается из композиции: ViewModel не должна знать про Activity.
+    LaunchedEffect(state.shareRequest) {
+        val request = state.shareRequest ?: return@LaunchedEffect
+        val started = runCatching {
+            context.startActivity(
+                android.content.Intent.createChooser(
+                    request.intent,
+                    request.description.ifBlank { "Выгрузить сессии" },
+                ),
+            )
+        }.isSuccess
+        if (started) viewModel.onShareLaunched(request.sessionIds) else viewModel.onShareFailed()
+    }
 
-    when (route) {
-        SettingsRoute.ROOT -> SettingsContent(
+    BackHandler(enabled = route != SettingsRoute.Root) { route = SettingsRoute.Root }
+
+    // Снекбар висит над всей вкладкой, а не над корневым экраном. Сообщения
+    // («шлагбаум сохранён», «нет разрешения на локацию», исход проверочного
+    // звонка) рождаются как раз на вложенных экранах, и показать их надо там,
+    // где человек находится.
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(state.message) {
+        val message = state.message ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(message)
+        viewModel.dismissMessage()
+    }
+
+    Box(modifier.fillMaxSize()) {
+    when (val current = route) {
+        SettingsRoute.Root -> SettingsContent(
             state = state,
-            onSaveBarrier = viewModel::saveBarrier,
-            onSaveHome = viewModel::saveHome,
             onCancelTimeout = viewModel::setCancelTimeout,
             onRecordingMinutes = viewModel::setRecordingMinutes,
             onPhoneAccount = viewModel::setPhoneAccount,
-            onOpenCollection = { route = SettingsRoute.COLLECTION },
-            onOpenPermissions = { route = SettingsRoute.PERMISSIONS },
-            onMessageShown = viewModel::dismissMessage,
-            modifier = modifier,
+            onExport = viewModel::requestShare,
+            onOpenBarrier = { route = SettingsRoute.BarrierEdit(it.id) },
+            onOpenHome = { route = SettingsRoute.Home },
+            onOpenCollection = { route = SettingsRoute.Collection },
+            onOpenPermissions = { route = SettingsRoute.Permissions },
         )
 
-        SettingsRoute.COLLECTION -> SubScreenScaffold(
-            title = "Параметры сбора",
-            onBack = { route = SettingsRoute.ROOT },
-            modifier = modifier,
-        ) { _ ->
-            CollectionParamsContent(
+        SettingsRoute.Collection -> {
+            val sensors = rememberSensorAvailability()
+            SubScreenScaffold(
+                title = "Параметры сбора",
+                onBack = { route = SettingsRoute.Root },
+            ) { contentModifier ->
+                CollectionParamsContent(
+                    modifier = contentModifier,
+                    settings = state.settings,
+                    hasBarometer = sensors.barometer,
+                    hasStepCounter = sensors.stepCounter,
+                    onLocationInterval = viewModel::setLocationInterval,
+                    onLocationPriority = viewModel::setLocationPriority,
+                    onLocationDisplacement = viewModel::setLocationDisplacement,
+                    onAccelerometerHz = viewModel::setAccelerometerHz,
+                    onBarometerHz = viewModel::setBarometerHz,
+                    onReset = viewModel::resetCollectionParams,
+                )
+            }
+        }
+
+        SettingsRoute.Permissions -> SubScreenScaffold(
+            title = "Разрешения",
+            onBack = { route = SettingsRoute.Root },
+        ) { contentModifier ->
+            PermissionsScreen(contentModifier)
+        }
+
+        SettingsRoute.Home -> SubScreenScaffold(
+            title = "Дом",
+            onBack = { route = SettingsRoute.Root },
+        ) { contentModifier ->
+            HomePointContent(
+                modifier = contentModifier,
                 settings = state.settings,
-                onLocationInterval = viewModel::setLocationInterval,
-                onLocationPriority = viewModel::setLocationPriority,
-                onLocationDisplacement = viewModel::setLocationDisplacement,
-                onAccelerometerHz = viewModel::setAccelerometerHz,
-                onBarometerHz = viewModel::setBarometerHz,
-                onReset = viewModel::resetCollectionParams,
+                onPickCurrent = viewModel::currentLocation,
+                onSave = viewModel::saveHome,
             )
         }
 
-        SettingsRoute.PERMISSIONS -> SubScreenScaffold(
-            title = "Разрешения",
-            onBack = { route = SettingsRoute.ROOT },
-            modifier = modifier,
-        ) { _ ->
-            PermissionsScreen()
+        is SettingsRoute.BarrierEdit -> {
+            val barrier = state.barriers.firstOrNull { it.id == current.barrierId }
+            val index = state.barriers.indexOfFirst { it.id == current.barrierId }.coerceAtLeast(0)
+            if (barrier == null) {
+                // Запись исчезла, пока экран был открыт, — возвращаемся в список,
+                // а не показываем пустую форму.
+                LaunchedEffect(current.barrierId) { route = SettingsRoute.Root }
+            } else {
+                SubScreenScaffold(
+                    title = barrier.displayName,
+                    onBack = { route = SettingsRoute.Root },
+                ) { contentModifier ->
+                    BarrierContent(
+                        modifier = contentModifier,
+                        barrier = barrier,
+                        accent = SesameAccentColors.current.barrier(index),
+                        position = index,
+                        onPickCurrent = viewModel::currentLocation,
+                        onSave = viewModel::saveBarrier,
+                        onTestCall = viewModel::testCall,
+                    )
+                }
+            }
         }
+    }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }
 
 @Composable
 private fun SettingsContent(
     state: SettingsUiState,
-    onSaveBarrier: (Barrier) -> Unit,
-    onSaveHome: (Double?, Double?, Int) -> Unit,
     onCancelTimeout: (Int) -> Unit,
     onRecordingMinutes: (Int) -> Unit,
     onPhoneAccount: (String?) -> Unit,
+    onExport: () -> Unit,
+    onOpenBarrier: (Barrier) -> Unit,
+    onOpenHome: () -> Unit,
     onOpenCollection: () -> Unit,
     onOpenPermissions: () -> Unit,
-    onMessageShown: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    LaunchedEffect(state.message) {
-        val message = state.message ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(message)
-        onMessageShown()
-    }
-
-    Scaffold(
-        modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = MaterialTheme.colorScheme.background,
-        // Верхний отступ под статус-бар добавляет TabHeader (TopAppBar), нижний —
-        // MainActivity: Scaffold не должен приставлять к ним свой.
-        contentWindowInsets = WindowInsets(0),
-    ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+    Box(modifier = modifier.fillMaxSize().background(Palette.Background)) {
+        Column(Modifier.fillMaxSize()) {
             TabHeader("Настройки")
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = Dimens.ScreenPadding,
-                    end = Dimens.ScreenPadding,
-                    bottom = Dimens.SpaceXl,
-                ),
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = Dimens.ScreenPadding)
+                    .padding(bottom = Dimens.SpaceXl),
                 verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
             ) {
-                item { SectionTitle("Шлагбаумы") }
-
-                items(state.barriers, key = { it.id }) { barrier ->
-                    BarrierEditor(barrier = barrier, onSave = onSaveBarrier)
+                if (state.missingPermissions > 0) {
+                    PermissionAlert(
+                        hint = state.missingHint,
+                        count = state.missingPermissions,
+                        onClick = onOpenPermissions,
+                    )
                 }
 
-                item { SectionTitle("Дом") }
-
-                item { HomeEditor(settings = state.settings, onSave = onSaveHome) }
-
-                item { SectionTitle("Звонок") }
-
-                item {
-                    SectionCard {
-                        SliderSetting(
-                            title = "Таймаут отмены",
-                            description = "Пока идёт отсчёт, звонок ещё не ушёл. " +
-                                "0 — звонить сразу, без подтверждения.",
-                            value = state.settings.cancelTimeoutSeconds,
-                            range = 0..SesameSettings.MAX_CANCEL_TIMEOUT_SECONDS,
-                            valueLabel = { if (it == 0) "без подтверждения" else "$it с" },
-                            onChange = onCancelTimeout,
+                GroupCaption("Шлагбаумы", top = Dimens.SpaceXs)
+                SettingsGroup {
+                    if (state.barriers.isEmpty()) {
+                        GroupRow {
+                            Text(
+                                "Шлагбаумов нет — они создаются при первом запуске",
+                                style = SesameText.Caption,
+                                color = Palette.TextMuted,
+                            )
+                        }
+                    }
+                    state.barriers.forEachIndexed { index, barrier ->
+                        if (index > 0) GroupDivider()
+                        NavGroupRow(
+                            title = barrier.displayName,
+                            value = maskPhone(barrier.phoneNumber) ?: "номер не задан",
+                            valueMono = barrier.phoneNumber != null,
+                            leading = {
+                                StatusDot(
+                                    color = SesameAccentColors.current.barrier(index).container,
+                                    size = 10.dp,
+                                )
+                            },
+                            onClick = { onOpenBarrier(barrier) },
                         )
                     }
+                }
+
+                GroupCaption("Звонок и запись")
+                SettingsGroup {
+                    // §4.1: 0 — звонить сразу, без подтверждения. Это не «выключено»,
+                    // а отдельный осмысленный режим, поэтому он стоит шагом шкалы,
+                    // а не тумблером рядом.
+                    StepperRow(
+                        title = "Отсчёт перед звонком",
+                        value = if (state.settings.cancelTimeoutSeconds == 0) {
+                            "сразу"
+                        } else {
+                            "${state.settings.cancelTimeoutSeconds} с"
+                        },
+                        minusEnabled = state.settings.cancelTimeoutSeconds > 0,
+                        plusEnabled = state.settings.cancelTimeoutSeconds <
+                            SesameSettings.MAX_CANCEL_TIMEOUT_SECONDS,
+                        onMinus = { onCancelTimeout(state.settings.cancelTimeoutSeconds - 1) },
+                        onPlus = { onCancelTimeout(state.settings.cancelTimeoutSeconds + 1) },
+                        valueWidth = 62.dp,
+                    )
+                    GroupDivider()
+                    StepperRow(
+                        title = "Длительность записи",
+                        value = "${state.settings.recordingDurationMinutes} мин",
+                        minusEnabled = state.settings.recordingDurationMinutes >
+                            SesameSettings.MIN_RECORDING_MINUTES,
+                        plusEnabled = state.settings.recordingDurationMinutes <
+                            SesameSettings.MAX_RECORDING_MINUTES,
+                        onMinus = {
+                            onRecordingMinutes(
+                                RecordingMinuteSteps.previous(state.settings.recordingDurationMinutes),
+                            )
+                        },
+                        onPlus = {
+                            onRecordingMinutes(
+                                RecordingMinuteSteps.next(state.settings.recordingDurationMinutes),
+                            )
+                        },
+                        valueWidth = 62.dp,
+                    )
+                    GroupDivider()
+                    NavGroupRow(
+                        title = "Параметры сбора",
+                        value = "лок ${state.settings.locationIntervalSeconds} с · " +
+                            "акс ${state.settings.accelerometerHz} Гц",
+                        onClick = onOpenCollection,
+                    )
                 }
 
                 // §4.1: выбор SIM показывается, только если звонящих аккаунтов
                 // больше одного. На одной SIM он был бы выбором из одного варианта.
                 if (state.phoneAccounts.size > 1) {
-                    item {
-                        SectionCard(title = "SIM для звонка") {
+                    GroupCaption("SIM для звонка")
+                    SettingsGroup {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
                                 "Шлагбаум пускает по Caller ID: звонок не с той SIM " +
                                     "его не откроет.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = SesameText.Caption,
+                                color = Palette.TextMuted,
                             )
-                            ChipRow(
+                            SegmentedRow(
                                 options = listOf<String?>(null) + state.phoneAccounts.map { it.id },
                                 selected = state.settings.phoneAccountId,
                                 onSelect = onPhoneAccount,
                                 label = { id ->
                                     if (id == null) {
-                                        "По умолчанию"
+                                        "Авто"
                                     } else {
                                         state.phoneAccounts.first { it.id == id }.label
                                     }
                                 },
+                                height = 44.dp,
+                                corner = 13.dp,
                             )
                         }
                     }
                 }
 
-                item { SectionTitle("Интенсивная запись") }
+                GroupCaption("Геофенсы")
+                SettingsGroup {
+                    NavGroupRow(
+                        title = "Дом",
+                        value = if (state.settings.homeLat == null || state.settings.homeLon == null) {
+                            "не задан"
+                        } else {
+                            "${state.settings.homeRadiusMeters} м"
+                        },
+                        valueMono = state.settings.homeLat != null,
+                        onClick = onOpenHome,
+                    )
+                }
 
-                item {
-                    SectionCard {
-                        SliderSetting(
-                            title = "Длительность записи",
-                            description = "Жёсткий предохранитель: сессия остановится сама.",
-                            value = state.settings.recordingDurationMinutes,
-                            range = SesameSettings.MIN_RECORDING_MINUTES..
-                                SesameSettings.MAX_RECORDING_MINUTES,
-                            valueLabel = { formatMinutes(it) },
-                            onChange = onRecordingMinutes,
+                GroupCaption("Данные")
+                SettingsGroup {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+                        verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
+                    ) {
+                        CardHeadRow(
+                            title = "Хранилище",
+                            value = "${formatBytes(state.usedBytes)} / " +
+                                formatBytes(SesameSettings.STORAGE_LIMIT_BYTES),
+                        )
+                        ThinProgress(
+                            progress = state.usedBytes.toFloat() /
+                                SesameSettings.STORAGE_LIMIT_BYTES,
+                            color = if (state.usedBytes >
+                                SesameSettings.STORAGE_LIMIT_BYTES * 0.9
+                            ) {
+                                Palette.Record
+                            } else {
+                                Palette.Teal
+                            },
+                        )
+                    }
+                    GroupDivider()
+                    GroupRow(onClick = if (state.preparingArchive) null else onExport) {
+                        Text(
+                            text = if (state.preparingArchive) "Собираю архив…" else "Экспорт в архив",
+                            style = SesameText.Body.copy(fontWeight = FontWeight.Medium),
+                            color = Palette.TextPrimary,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (state.unsharedCount > 0) {
+                            Text(
+                                text = "${state.unsharedCount}",
+                                style = SesameText.Mono13,
+                                color = Palette.Amber,
+                            )
+                        }
+                        Icon(
+                            imageVector = SesameIcons.Export,
+                            contentDescription = null,
+                            tint = Palette.TextDim,
+                            modifier = Modifier.size(18.dp),
                         )
                     }
                 }
 
-                item { SectionTitle("Сбор данных") }
-
-                item {
-                    NavigationRow(
-                        title = "Параметры сбора",
-                        subtitle = "Интервалы и частоты — крутятся без пересборки",
-                        onClick = onOpenCollection,
-                    )
-                }
-
-                item {
-                    NavigationRow(
+                GroupCaption("Система")
+                SettingsGroup {
+                    NavGroupRow(
                         title = "Разрешения",
-                        subtitle = "Что выдано, что отвалилось, оптимизация батареи",
+                        value = if (state.missingPermissions == 0) {
+                            "всё выдано"
+                        } else {
+                            "не выдано: ${state.missingPermissions}"
+                        },
                         onClick = onOpenPermissions,
                     )
                 }
-            }
-        }
-    }
-}
 
-/**
- * Форма одного шлагбаума. Сохранение явной кнопкой: поля вводятся посимвольно,
- * и писать в базу каждое нажатие клавиши здесь незачем.
- */
-@Composable
-private fun BarrierEditor(barrier: Barrier, onSave: (Barrier) -> Unit) {
-    var label by remember(barrier.id) { mutableStateOf(barrier.label) }
-    var phone by remember(barrier.id) { mutableStateOf(barrier.phoneNumber.orEmpty()) }
-    var lat by remember(barrier.id) { mutableStateOf(barrier.lat?.toString().orEmpty()) }
-    var lon by remember(barrier.id) { mutableStateOf(barrier.lon?.toString().orEmpty()) }
-    var radius by remember(barrier.id) { mutableStateOf(barrier.radiusMeters.toInt().toString()) }
-
-    val edited = barrier.copy(
-        label = label.ifBlank { barrier.label },
-        phoneNumber = phone.trim().takeIf { it.isNotBlank() },
-        lat = lat.trim().toDoubleOrNull(),
-        lon = lon.trim().toDoubleOrNull(),
-        radiusMeters = radius.trim().toFloatOrNull() ?: Barrier.DEFAULT_RADIUS_METERS,
-    )
-    val dirty = edited != barrier
-
-    SectionCard(title = barrier.label) {
-        SettingTextField(value = label, onValueChange = { label = it }, label = "Подпись")
-        SettingTextField(
-            value = phone,
-            onValueChange = { phone = it },
-            label = "Номер телефона",
-            keyboardType = KeyboardType.Phone,
-            supporting = "Хранится только на устройстве",
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
-            SettingTextField(
-                value = lat,
-                onValueChange = { lat = it },
-                label = "Широта",
-                keyboardType = KeyboardType.Decimal,
-                modifier = Modifier.weight(1f),
-            )
-            SettingTextField(
-                value = lon,
-                onValueChange = { lon = it },
-                label = "Долгота",
-                keyboardType = KeyboardType.Decimal,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        SettingTextField(
-            value = radius,
-            onValueChange = { radius = it },
-            label = "Радиус геофенса, м",
-            keyboardType = KeyboardType.Number,
-            supporting = "По умолчанию 100 м (§4.4)",
-        )
-        Button(
-            onClick = { onSave(edited) },
-            enabled = dirty,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Сохранить") }
-    }
-}
-
-/**
- * Координата дома (§4.4: геофенс 500 м вокруг дома).
- *
- * Дома нет в модели данных §5 — там только шлагбаумы, у которых есть номер и
- * кнопка. Заводить ради одной точки запись в таблице шлагбаумов значило бы
- * поселить в списке нечто, чему нельзя звонить и что обязано не появиться на
- * главном экране. Поэтому дом — три настройки, и правятся они здесь.
- *
- * Пустые координаты — валидное состояние: геофенс просто не регистрируется.
- */
-@Composable
-private fun HomeEditor(
-    settings: SesameSettings,
-    onSave: (Double?, Double?, Int) -> Unit,
-) {
-    var lat by remember(settings.homeLat) { mutableStateOf(settings.homeLat?.toString().orEmpty()) }
-    var lon by remember(settings.homeLon) { mutableStateOf(settings.homeLon?.toString().orEmpty()) }
-    var radius by remember(settings.homeRadiusMeters) {
-        mutableStateOf(settings.homeRadiusMeters.toString())
-    }
-
-    val parsedLat = lat.trim().toDoubleOrNull()
-    val parsedLon = lon.trim().toDoubleOrNull()
-    val parsedRadius = radius.trim().toIntOrNull() ?: settings.homeRadiusMeters
-    val dirty = parsedLat != settings.homeLat ||
-        parsedLon != settings.homeLon ||
-        parsedRadius != settings.homeRadiusMeters
-
-    SectionCard(title = "Дом") {
-        Text(
-            "Геофенс вокруг дома. Нужен не для функциональности: по нему " +
-                "проверяется, с какой задержкой Android доставляет фоновые события " +
-                "и не усыпляет ли One UI приложение.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
-            SettingTextField(
-                value = lat,
-                onValueChange = { lat = it },
-                label = "Широта",
-                keyboardType = KeyboardType.Decimal,
-                modifier = Modifier.weight(1f),
-            )
-            SettingTextField(
-                value = lon,
-                onValueChange = { lon = it },
-                label = "Долгота",
-                keyboardType = KeyboardType.Decimal,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        SettingTextField(
-            value = radius,
-            onValueChange = { radius = it },
-            label = "Радиус геофенса, м",
-            keyboardType = KeyboardType.Number,
-            supporting = "По умолчанию 500 м. Пустые координаты — геофенса нет, " +
-                "и это не ошибка",
-        )
-        Button(
-            onClick = { onSave(parsedLat, parsedLon, parsedRadius) },
-            enabled = dirty,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Сохранить") }
-    }
-}
-
-@Composable
-private fun NavigationRow(title: String, subtitle: String, onClick: () -> Unit) {
-    SectionCard {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                FootNote(
+                    "Выбор SIM появится здесь, если звонящих аккаунтов станет больше " +
+                        "одного. Номера хранятся только на устройстве.",
                 )
-            }
-            TextButton(onClick = onClick) {
-                Text("Открыть")
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+                Spacer(Modifier.height(Dimens.SpaceS))
             }
         }
     }
 }
 
 /**
- * Числовая настройка ползунком. Значение уезжает в DataStore по отпусканию
- * пальца, а не на каждый пиксель: писать настройку сотню раз за жест незачем.
+ * Красная плашка «не хватает разрешений».
+ *
+ * Стоит первой строкой экрана и называет разрешение по имени: «что-то не так»
+ * без имени заставляет заходить внутрь и сравнивать список глазами.
  */
 @Composable
-internal fun SliderSetting(
-    title: String,
-    value: Int,
-    range: IntRange,
-    valueLabel: (Int) -> String,
-    onChange: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-    description: String? = null,
-    step: Int = 1,
-) {
-    var position by remember(value) { mutableFloatStateOf(value.toFloat()) }
-    val snapped = snap(position, range, step)
-
-    Column(modifier = modifier.fillMaxWidth()) {
+private fun PermissionAlert(hint: String?, count: Int, onClick: () -> Unit) {
+    SesameSurface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Tones.AlertSurface,
+        borderColor = Palette.RecordOutline,
+        corner = 16.dp,
+        onClick = onClick,
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Dimens.StackGap),
         ) {
-            Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            Text(valueLabel(snapped), style = MaterialTheme.typography.titleMedium)
-        }
-        if (description != null) {
+            Icon(
+                imageVector = SesameIcons.Alert,
+                contentDescription = null,
+                tint = Palette.Record,
+                modifier = Modifier.size(20.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = "Не хватает разрешений: $count",
+                    style = SesameText.CardTitle,
+                    color = Palette.TextPrimary,
+                )
+                if (hint != null) {
+                    Text(
+                        text = hint,
+                        style = SesameText.Caption,
+                        color = Palette.RecordMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             Text(
-                description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = "Исправить",
+                style = SesameText.Caption.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                color = Palette.RecordChipText,
             )
         }
-        Slider(
-            value = position,
-            onValueChange = { position = it },
-            onValueChangeFinished = { onChange(snap(position, range, step)) },
-            valueRange = range.first.toFloat()..range.last.toFloat(),
-            steps = (((range.last - range.first) / step) - 1).coerceAtLeast(0),
-        )
     }
 }
 
-private fun snap(value: Float, range: IntRange, step: Int): Int {
-    val offset = ((value - range.first) / step).roundToInt() * step
-    return (range.first + offset).coerceIn(range.first, range.last)
+/**
+ * Шаги длительности записи.
+ *
+ * Не равномерная шкала: между 1 и 15 минутами разница смысловая («проверить, что
+ * пишется» против «доехать до работы»), а между 90 и 120 — почти никакой.
+ */
+internal object RecordingMinuteSteps {
+    private val values = listOf(1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120)
+
+    fun next(current: Int): Int = values.firstOrNull { it > current } ?: values.last()
+
+    fun previous(current: Int): Int = values.lastOrNull { it < current } ?: values.first()
 }
 
-@Preview(showBackground = true, heightDp = 1200)
+private val previewBarriers = listOf(
+    Barrier(id = 1, label = "Шлагбаум A", phoneNumber = "+7 900 000-00-14", lat = 55.75124, lon = 37.61841, name = "Северный въезд"),
+    Barrier(id = 2, label = "Шлагбаум B", phoneNumber = null, lat = null, lon = null, name = "Южный въезд"),
+)
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 private fun SettingsPreview() {
     SesameTheme {
         SettingsContent(
             state = SettingsUiState(
-                barriers = listOf(
-                    Barrier(id = 1, label = "Шлагбаум A", phoneNumber = "+7 900 000-00-00", lat = 55.7, lon = 37.6),
-                    Barrier(id = 2, label = "Шлагбаум B", phoneNumber = null, lat = null, lon = null),
-                ),
+                barriers = previewBarriers,
                 settings = SesameSettings(),
-                phoneAccounts = listOf(
-                    PhoneAccountOption("sim1", "SIM 1"),
-                    PhoneAccountOption("sim2", "SIM 2"),
-                ),
+                missingPermissions = 1,
+                missingHint = "Локация в фоне",
+                usedBytes = 2_400_000_000,
+                unsharedCount = 2,
             ),
-            onSaveBarrier = {},
-            onSaveHome = { _, _, _ -> },
             onCancelTimeout = {},
             onRecordingMinutes = {},
             onPhoneAccount = {},
+            onExport = {},
+            onOpenBarrier = {},
+            onOpenHome = {},
             onOpenCollection = {},
             onOpenPermissions = {},
-            onMessageShown = {},
-        )
-    }
-}
-
-@Preview(showBackground = true, heightDp = 900)
-@Composable
-private fun CollectionParamsPreview() {
-    SesameTheme {
-        CollectionParamsContent(
-            settings = SesameSettings(locationPriority = LocationPriority.BALANCED),
-            onLocationInterval = {},
-            onLocationPriority = {},
-            onLocationDisplacement = {},
-            onAccelerometerHz = {},
-            onBarometerHz = {},
-            onReset = {},
         )
     }
 }

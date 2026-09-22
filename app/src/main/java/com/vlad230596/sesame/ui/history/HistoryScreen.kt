@@ -1,34 +1,36 @@
 package com.vlad230596.sesame.ui.history
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,9 +39,16 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vlad230596.sesame.data.CallOutcome
@@ -50,12 +59,18 @@ import com.vlad230596.sesame.data.TravelMode
 import com.vlad230596.sesame.data.entity.Barrier
 import com.vlad230596.sesame.data.entity.PassageLabel
 import com.vlad230596.sesame.data.entity.RecordingSession
-import com.vlad230596.sesame.ui.common.ChipRow
-import com.vlad230596.sesame.ui.common.PassageCard
-import com.vlad230596.sesame.ui.common.SectionCard
-import com.vlad230596.sesame.ui.common.SectionTitle
-import com.vlad230596.sesame.ui.common.SettingTextField
+import com.vlad230596.sesame.ui.common.FilterPill
+import com.vlad230596.sesame.ui.common.FootNote
+import com.vlad230596.sesame.ui.common.GroupCaption
+import com.vlad230596.sesame.ui.common.LabelEditor
+import com.vlad230596.sesame.ui.common.SegmentedRow
+import com.vlad230596.sesame.ui.common.SesameButton
+import com.vlad230596.sesame.ui.common.SesameField
+import com.vlad230596.sesame.ui.common.SesameIcons
+import com.vlad230596.sesame.ui.common.SesameSurface
+import com.vlad230596.sesame.ui.common.SquareIconButton
 import com.vlad230596.sesame.ui.common.TabHeader
+import com.vlad230596.sesame.ui.common.Tones
 import com.vlad230596.sesame.ui.common.formatBytes
 import com.vlad230596.sesame.ui.common.formatDateTime
 import com.vlad230596.sesame.ui.common.formatDayHeader
@@ -64,17 +79,25 @@ import com.vlad230596.sesame.ui.common.formatTime
 import com.vlad230596.sesame.ui.common.localDateOf
 import com.vlad230596.sesame.ui.common.title
 import com.vlad230596.sesame.ui.theme.Dimens
+import com.vlad230596.sesame.ui.theme.Palette
+import com.vlad230596.sesame.ui.theme.SesameAccentColors
+import com.vlad230596.sesame.ui.theme.SesameText
 import com.vlad230596.sesame.ui.theme.SesameTheme
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 
 /**
- * Вкладка «История» (§4.5).
+ * Вкладка «История» (§4.5), по утверждённому макету.
  *
- * Общая лента меток проездов и сессий записи. Карточка метки правится в один
- * тап: направление и режим заполнены догадкой, и если исправление будет стоить
- * дороже касания, датасет останется неразмеченным.
+ * Лента — это список **строк**, а не карточек-редакторов: за неделю сбора здесь
+ * копятся сотни событий, и экран, на котором помещается три карточки, перестаёт
+ * быть историей. Правка живёт в окне, которое поднимается по тапу, и там метка
+ * правится в один тап — ровно как требует §4.5.
+ *
+ * Слева у каждой строки полоска цветом шлагбаума: та же пара, что у кнопок на
+ * главном экране и в виджете. Цвет закреплён за позицией кнопки, поэтому по
+ * полоске видно, в какую именно кнопку человек попадал, не читая подпись.
  */
 @Composable
 fun HistoryScreen(modifier: Modifier = Modifier) {
@@ -98,10 +121,12 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
 
     HistoryContent(
         state = state,
+        onFilter = viewModel::setFilter,
         onDirection = viewModel::setDirection,
         onMode = viewModel::setMode,
         onDiscarded = viewModel::setDiscarded,
         onNote = viewModel::setNote,
+        onConfirm = viewModel::confirm,
         onShare = viewModel::requestShare,
         onAddManual = viewModel::addManual,
         onMessageShown = viewModel::dismissMessage,
@@ -109,13 +134,16 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HistoryContent(
     state: HistoryUiState,
+    onFilter: (HistoryFilter) -> Unit,
     onDirection: (Long, Direction) -> Unit,
     onMode: (Long, TravelMode) -> Unit,
     onDiscarded: (Long, Boolean) -> Unit,
     onNote: (Long, String) -> Unit,
+    onConfirm: (Long) -> Unit,
     onShare: () -> Unit,
     onAddManual: (Long, Long?, Direction, TravelMode, String?) -> Unit,
     onMessageShown: () -> Unit,
@@ -123,6 +151,8 @@ private fun HistoryContent(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var manualVisible by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Long?>(null) }
+    var sessionDetails by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
@@ -130,24 +160,55 @@ private fun HistoryContent(
         onMessageShown()
     }
 
-    Scaffold(
-        modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = MaterialTheme.colorScheme.background,
-        // Верхний отступ под статус-бар добавляет TabHeader (TopAppBar), нижний —
-        // MainActivity: Scaffold не должен приставлять к ним свой.
-        contentWindowInsets = WindowInsets(0),
-    ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+    Box(modifier = modifier.fillMaxSize().background(Palette.Background)) {
+        Column(Modifier.fillMaxSize()) {
             TabHeader("История") {
-                IconButton(onClick = onShare, enabled = !state.preparing) {
-                    Icon(Icons.Filled.Share, contentDescription = "Поделиться непошаренным")
-                }
-                IconButton(onClick = { manualVisible = true }) {
-                    Icon(Icons.Filled.Add, contentDescription = "Добавить проезд вручную")
+                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
+                    SquareIconButton(
+                        icon = SesameIcons.Export,
+                        contentDescription = if (state.preparing) {
+                            "Собираю архив"
+                        } else {
+                            "Выгрузить непошаренное: ${state.unsharedCount}"
+                        },
+                        enabled = !state.preparing,
+                        onClick = onShare,
+                        tint = if (state.unsharedCount > 0) Palette.Amber else Palette.TextPrimary,
+                    )
+                    SquareIconButton(
+                        icon = SesameIcons.Plus,
+                        contentDescription = "Добавить метку задним числом",
+                        onClick = { manualVisible = true },
+                    )
                 }
             }
 
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = Dimens.ScreenPadding)
+                    .padding(bottom = Dimens.StackGap),
+                horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
+            ) {
+                FilterPill(
+                    text = "Всё",
+                    selected = state.filter == HistoryFilter.ALL,
+                    onClick = { onFilter(HistoryFilter.ALL) },
+                )
+                FilterPill(
+                    text = "Без подтверждения · ${state.unconfirmedCount}",
+                    selected = state.filter == HistoryFilter.UNCONFIRMED,
+                    onClick = { onFilter(HistoryFilter.UNCONFIRMED) },
+                )
+                FilterPill(
+                    text = "Сессии",
+                    selected = state.filter == HistoryFilter.SESSIONS,
+                    onClick = { onFilter(HistoryFilter.SESSIONS) },
+                )
+            }
+
+            val items = state.visibleItems
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
@@ -157,71 +218,129 @@ private fun HistoryContent(
                 ),
                 verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
             ) {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
-                    ) {
-                        OutlinedButton(
-                            onClick = onShare,
-                            enabled = !state.preparing,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            // §7: архив собирается из файлов, а не из описи, и на
-                            // сотнях мегабайт это заметное время — кнопка обязана
-                            // сказать, что она занята.
-                            Text(
-                                if (state.preparing) {
-                                    "Собираю архив…"
-                                } else {
-                                    "Поделиться (${state.unsharedCount})"
-                                },
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = { manualVisible = true },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Добавить проезд") }
-                    }
-                }
-
-                if (state.items.isEmpty()) {
+                if (items.isEmpty()) {
                     item {
-                        SectionCard {
-                            Text("Пока ничего нет. Метки появятся после нажатия кнопки " +
-                                "шлагбаума или запуска интенсивной записи.")
+                        SesameSurface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Tones.SurfaceLow,
+                            borderColor = Palette.BorderStrong,
+                        ) {
+                            Text(
+                                text = when (state.filter) {
+                                    HistoryFilter.ALL -> "Пока ничего нет. Метки появятся после " +
+                                        "нажатия кнопки шлагбаума или запуска интенсивной записи."
+
+                                    HistoryFilter.UNCONFIRMED -> "Всё разобрано: меток без " +
+                                        "подтверждения нет."
+
+                                    HistoryFilter.SESSIONS -> "Сессий записи ещё не было."
+                                },
+                                style = SesameText.Caption,
+                                color = Palette.TextMuted,
+                                modifier = Modifier.padding(16.dp),
+                            )
                         }
                     }
                 }
 
                 var lastDay: String? = null
-                state.items.forEach { entry ->
+                items.forEach { entry ->
                     val day = formatDayHeader(entry.timestamp)
                     if (day != lastDay) {
                         lastDay = day
-                        item(key = "header-$day-${entry.key}") { SectionTitle(day) }
+                        item(key = "header-$day-${entry.key}") {
+                            GroupCaption(day, top = Dimens.SpaceXs)
+                        }
                     }
                     item(key = entry.key) {
                         when (entry) {
-                            is HistoryItem.Passage -> PassageCard(
-                                label = entry.label,
-                                barrierLabel = entry.barrierLabel,
-                                onDirection = { onDirection(entry.label.id, it) },
-                                onMode = { onMode(entry.label.id, it) },
-                                onToggleDiscarded = { onDiscarded(entry.label.id, it) },
-                                onNote = { onNote(entry.label.id, it) },
+                            is HistoryItem.Passage -> PassageRow(
+                                entry = entry,
+                                onClick = { editing = entry.label.id },
                             )
 
-                            is HistoryItem.Session -> SessionCard(entry.session)
+                            is HistoryItem.Session -> SessionRow(
+                                session = entry.session,
+                                onClick = { sessionDetails = entry.session.id },
+                            )
                         }
                     }
                 }
             }
         }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+
+    // Правка метки (макет «Правка метки»): окно поверх ленты, лента остаётся
+    // видна сверху — так понятно, что правится одна строка, а не открыт новый
+    // экран, с которого надо возвращаться.
+    val edited = editing?.let { id ->
+        state.items.filterIsInstance<HistoryItem.Passage>().firstOrNull { it.label.id == id }
+    }
+    if (edited != null) {
+        val accent = SesameAccentColors.current.barrier(edited.barrierIndex).container
+        ModalBottomSheet(
+            onDismissRequest = {
+                onConfirm(edited.label.id)
+                editing = null
+            },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Palette.Surface,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = Dimens.ScreenPadding)
+                    .padding(bottom = Dimens.SpaceL),
+                verticalArrangement = Arrangement.spacedBy(Dimens.SpaceM),
+            ) {
+                LabelEditor(
+                    label = edited.label,
+                    barrierName = edited.barrierName,
+                    accent = accent,
+                    onDirection = { onDirection(edited.label.id, it) },
+                    onMode = { onMode(edited.label.id, it) },
+                    onToggleDiscarded = { onDiscarded(edited.label.id, it) },
+                    onNote = { onNote(edited.label.id, it) },
+                )
+                SesameButton(
+                    text = "Готово",
+                    modifier = Modifier.fillMaxWidth(),
+                    height = 58.dp,
+                    onClick = {
+                        onConfirm(edited.label.id)
+                        editing = null
+                    },
+                )
+            }
+        }
+    }
+
+    val session = sessionDetails?.let { id ->
+        state.items.filterIsInstance<HistoryItem.Session>().firstOrNull { it.session.id == id }
+    }
+    if (session != null) {
+        ModalBottomSheet(
+            onDismissRequest = { sessionDetails = null },
+            containerColor = Palette.Surface,
+        ) {
+            SessionDetails(
+                session = session.session,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Dimens.ScreenPadding)
+                    .padding(bottom = Dimens.SpaceXl),
+            )
+        }
     }
 
     if (manualVisible) {
-        ManualPassageDialog(
+        ManualPassageSheet(
             barriers = state.barriers,
             onDismiss = { manualVisible = false },
             onAdd = { timestamp, barrierId, direction, mode, note ->
@@ -232,50 +351,257 @@ private fun HistoryContent(
     }
 }
 
+/**
+ * Строка метки проезда.
+ *
+ * Отменённая до звонка и ошибочная метки нарисованы тише и полоской без цвета:
+ * они остаются в ленте (в датасете «передумал» и «не нажимал» — разные события),
+ * но глаз по ним не цепляется.
+ */
 @Composable
-private fun SessionCard(session: RecordingSession) {
-    SectionCard(containerColor = MaterialTheme.colorScheme.tertiaryContainer) {
+private fun PassageRow(entry: HistoryItem.Passage, onClick: () -> Unit) {
+    val label = entry.label
+    val muted = label.discarded || label.outcome == CallOutcome.CANCELLED_BY_USER
+    val accent = SesameAccentColors.current.barrier(entry.barrierIndex).container
+
+    SesameSurface(
+        modifier = Modifier.fillMaxWidth(),
+        color = if (muted) Tones.SurfaceLow else Palette.Surface,
+        borderColor = Palette.BorderStrong,
+        corner = Dimens.CardCorner,
+        onClick = onClick,
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 13.dp),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.StackGap),
         ) {
-            Text(formatTime(session.startedAt), style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Запись · ${session.label.title()}",
-                style = MaterialTheme.typography.titleSmall,
+            AccentBar(if (muted) Tones.StripNeutral else accent)
+            Column(
                 modifier = Modifier.weight(1f),
-            )
-        }
-        val ended = session.endedAt
-        Text(
-            text = buildString {
-                if (ended == null) {
-                    append("идёт сейчас")
-                } else {
-                    append(formatDuration(ended - session.startedAt))
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
+                ) {
+                    Text(
+                        text = formatTime(label.timestamp),
+                        style = SesameText.Mono14,
+                        color = if (muted) Palette.TextMuted else Tones.TextSoft,
+                    )
+                    Text(
+                        text = entry.barrierName ?: "Шлагбаум не указан",
+                        style = SesameText.CardTitle,
+                        color = if (muted) Tones.TextSoft else Palette.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                append(" · ").append(formatBytes(session.sizeBytes))
-                append(" · ").append(if (session.shared) "выгружено" else "не выгружено")
-            },
-            style = MaterialTheme.typography.bodySmall,
-        )
-        session.fileDir?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+                Text(
+                    text = passageSubtitle(label),
+                    style = SesameText.Caption,
+                    color = Palette.TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Box(Modifier.align(Alignment.CenterVertically)) {
+                when {
+                    // «Подтвердить» важнее «сбоя»: сбой уже описан строкой ниже,
+                    // а вот метка, которую ещё не посмотрели глазами, — это
+                    // единственное, что от человека требуется.
+                    !label.confirmed ->
+                        StatusChip("подтвердить", Palette.AmberSurface, Palette.Amber)
+
+                    label.outcome == CallOutcome.DIALER_FALLBACK ||
+                        label.outcome == CallOutcome.NO_NUMBER ->
+                        StatusChip("сбой", Palette.RecordChip, Palette.RecordChipText)
+
+                    else -> Icon(
+                        imageVector = SesameIcons.ChevronRight,
+                        contentDescription = null,
+                        tint = Palette.TextDim,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
         }
+    }
+}
+
+/** Строка сессии записи. Полоска коралловая — тот же цвет, что у «идёт запись». */
+@Composable
+private fun SessionRow(session: RecordingSession, onClick: () -> Unit) {
+    SesameSurface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Palette.Surface,
+        borderColor = Palette.BorderStrong,
+        corner = Dimens.CardCorner,
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 13.dp),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.StackGap),
+        ) {
+            AccentBar(Palette.Record)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
+                ) {
+                    Text(
+                        text = formatTime(session.startedAt),
+                        style = SesameText.Mono14,
+                        color = Tones.TextSoft,
+                    )
+                    Text(
+                        text = "Сессия записи",
+                        style = SesameText.CardTitle,
+                        color = Palette.TextPrimary,
+                    )
+                }
+                Text(
+                    text = sessionSubtitle(session),
+                    style = SesameText.Caption,
+                    color = Palette.TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Box(Modifier.align(Alignment.CenterVertically)) {
+                if (session.endedAt == null) {
+                    StatusChip("идёт", Palette.RecordChip, Palette.RecordChipText)
+                } else {
+                    Icon(
+                        imageVector = SesameIcons.ChevronRight,
+                        contentDescription = null,
+                        tint = Palette.TextDim,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Цветная полоска слева: цвет шлагбаума, в кнопку которого попадали. */
+@Composable
+private fun AccentBar(color: Color) {
+    Box(
+        Modifier
+            .width(3.dp)
+            .height(38.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(color),
+    )
+}
+
+@Composable
+private fun StatusChip(text: String, container: Color, content: Color) {
+    Text(
+        text = text,
+        style = SesameText.Caption.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+        color = content,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(container)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
+}
+
+/**
+ * Вторая строка: что человек разметил и чем кончилась попытка.
+ *
+ * Исход не вытесняет разметку, а стоит после неё. Иначе метка со сбоем навсегда
+ * показывала бы «номер не задан» — и то, что её уже поправили руками, из ленты
+ * было бы не видно.
+ */
+private fun passageSubtitle(label: PassageLabel): String {
+    val parts = buildList {
+        if (label.direction != Direction.UNKNOWN) add(label.direction.title())
+        if (label.mode != TravelMode.UNKNOWN) add(label.mode.title())
+        add(
+            when (label.outcome) {
+                CallOutcome.CANCELLED_BY_USER -> "отменено до звонка"
+                CallOutcome.DIALER_FALLBACK -> "звонок не ушёл, открыта звонилка"
+                CallOutcome.NO_NUMBER -> "номер не задан"
+                CallOutcome.CALLED, null -> label.source.title()
+            },
+        )
+        if (label.discarded) add("ошибочная")
+    }
+    return parts.joinToString(" · ").replaceFirstChar { it.uppercase() }
+}
+
+private fun sessionSubtitle(session: RecordingSession): String = buildString {
+    append("«").append(session.label.title()).append("» · ")
+    val ended = session.endedAt
+    if (ended == null) append("идёт сейчас") else append(formatDuration(ended - session.startedAt))
+    append(" · ").append(formatBytes(session.sizeBytes))
+}
+
+@Composable
+private fun SessionDetails(session: RecordingSession, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
+    ) {
+        Text(
+            text = "Сессия записи",
+            style = SesameText.DialogTitle.copy(fontSize = 22.sp),
+            color = Palette.TextPrimary,
+        )
+        Text(
+            text = "«${session.label.title()}» · начата ${formatDateTime(session.startedAt)}",
+            style = SesameText.Caption,
+            color = Palette.TextMuted,
+        )
+        Spacer(Modifier.height(Dimens.SpaceXs))
+        DetailRow("Длительность", session.endedAt?.let { formatDuration(it - session.startedAt) } ?: "идёт сейчас")
+        DetailRow("Объём", formatBytes(session.sizeBytes))
+        DetailRow("Выгружено", if (session.shared) "да" else "нет")
+        session.fileDir?.let { DetailRow("Файлы", it) }
+        FootNote(
+            "Файлы забираются с телефона по USB из Documents/Sesame/. Кнопка выгрузки " +
+                "в шапке собирает архив из всех ещё не выгруженных сессий.",
+        )
+    }
+}
+
+@Composable
+private fun DetailRow(title: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Dimens.StackGap),
+    ) {
+        Text(title, style = SesameText.Caption, color = Palette.TextMuted)
+        Text(
+            text = value,
+            style = SesameText.Mono13,
+            color = Palette.TextPrimary,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
 /**
  * Ретро-метка (§4.5). Время по умолчанию — «сейчас», потому что типичный случай
  * это «только что проехали, открыл не я».
+ *
+ * Пресеты «−5 мин» и «−1 ч» стоят перед календарём сознательно: в девяти случаях
+ * из десяти правка времени — это «чуть раньше, чем сейчас», и ради неё не надо
+ * открывать два системных диалога.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ManualPassageDialog(
+private fun ManualPassageSheet(
     barriers: List<Barrier>,
     onDismiss: () -> Unit,
     onAdd: (Long, Long?, Direction, TravelMode, String?) -> Unit,
@@ -288,52 +614,95 @@ private fun ManualPassageDialog(
     var datePickerVisible by remember { mutableStateOf(false) }
     var timePickerVisible by remember { mutableStateOf(false) }
 
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text("Проезд вручную") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
-            ) {
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Palette.Surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Dimens.ScreenPadding)
+                .padding(bottom = Dimens.SpaceL),
+            verticalArrangement = Arrangement.spacedBy(Dimens.SpaceM),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(Dimens.SpaceXs)) {
                 Text(
-                    "Например, шлагбаум открыл кто-то другой из машины.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = "Проезд задним числом",
+                    style = SesameText.DialogTitle.copy(fontSize = 22.sp),
+                    color = Palette.TextPrimary,
                 )
-                Text(formatDateTime(timestamp), style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceXs)) {
-                    TextButton(onClick = { timestamp = System.currentTimeMillis() }) {
-                        Text("Сейчас")
-                    }
-                    TextButton(onClick = { timestamp -= 5 * 60_000 }) { Text("−5 мин") }
-                    TextButton(onClick = { timestamp -= 60 * 60_000 }) { Text("−1 ч") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceXs)) {
-                    OutlinedButton(onClick = { datePickerVisible = true }) { Text("Дата") }
-                    OutlinedButton(onClick = { timePickerVisible = true }) { Text("Время") }
-                }
+                Text(
+                    text = "Например, шлагбаум открыл кто-то другой из машины.",
+                    style = SesameText.Caption,
+                    color = Palette.TextMuted,
+                )
+            }
 
-                if (barriers.isNotEmpty()) {
-                    Text("Шлагбаум", style = MaterialTheme.typography.labelLarge)
-                    ChipRow(
+            Column(verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
+                Text(
+                    text = "Когда",
+                    style = SesameText.Caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = Palette.TextMuted,
+                )
+                Text(
+                    text = formatDateTime(timestamp),
+                    style = SesameText.Mono14.copy(fontSize = 18.sp),
+                    color = Palette.TextPrimary,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
+                    TimeShortcut("Сейчас", Modifier.weight(1f)) {
+                        timestamp = System.currentTimeMillis()
+                    }
+                    TimeShortcut("−5 мин", Modifier.weight(1f)) { timestamp -= 5 * 60_000 }
+                    TimeShortcut("−1 ч", Modifier.weight(1f)) { timestamp -= 60 * 60_000 }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
+                    TimeShortcut("Дата", Modifier.weight(1f)) { datePickerVisible = true }
+                    TimeShortcut("Время", Modifier.weight(1f)) { timePickerVisible = true }
+                }
+            }
+
+            if (barriers.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
+                    Text(
+                        text = "Шлагбаум",
+                        style = SesameText.Caption.copy(fontWeight = FontWeight.SemiBold),
+                        color = Palette.TextMuted,
+                    )
+                    SegmentedRow(
                         options = barriers.map { it.id },
                         selected = barrierId ?: -1L,
                         onSelect = { barrierId = it },
-                        label = { id -> barriers.first { it.id == id }.label },
+                        label = { id -> barriers.first { it.id == id }.displayName },
+                        height = 50.dp,
                     )
                 }
+            }
 
-                Text("Направление", style = MaterialTheme.typography.labelLarge)
-                ChipRow(
+            Column(verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
+                Text(
+                    text = "Направление",
+                    style = SesameText.Caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = Palette.TextMuted,
+                )
+                SegmentedRow(
                     options = listOf(Direction.IN, Direction.OUT, Direction.UNKNOWN),
                     selected = direction,
                     onSelect = { direction = it },
-                    label = { it.title() },
+                    label = { if (it == Direction.UNKNOWN) "?" else it.title() },
+                    weights = { if (it == Direction.UNKNOWN) 0.45f else 1f },
                 )
+            }
 
-                Text("Режим", style = MaterialTheme.typography.labelLarge)
-                ChipRow(
+            Column(verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
+                Text(
+                    text = "Режим",
+                    style = SesameText.Caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = Palette.TextMuted,
+                )
+                SegmentedRow(
                     options = listOf(
                         TravelMode.DRIVER,
                         TravelMode.PASSENGER,
@@ -342,26 +711,27 @@ private fun ManualPassageDialog(
                     ),
                     selected = mode,
                     onSelect = { mode = it },
-                    label = { it.title() },
+                    label = { if (it == TravelMode.UNKNOWN) "?" else it.title() },
+                    weights = { if (it == TravelMode.UNKNOWN) 0.4f else 1f },
                 )
+            }
 
-                SettingTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = "Заметка",
-                    singleLine = false,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onAdd(timestamp, barrierId, direction, mode, note) }) {
-                Text("Добавить")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
-        },
-    )
+            SesameField(
+                value = note,
+                onValueChange = { note = it },
+                label = "Заметка",
+                placeholder = "Необязательно",
+                singleLine = false,
+            )
+
+            SesameButton(
+                text = "Добавить",
+                modifier = Modifier.fillMaxWidth(),
+                height = 58.dp,
+                onClick = { onAdd(timestamp, barrierId, direction, mode, note) },
+            )
+        }
+    }
 
     if (datePickerVisible) {
         val dateState = rememberDatePickerState(initialSelectedDateMillis = timestamp)
@@ -404,6 +774,21 @@ private fun ManualPassageDialog(
     }
 }
 
+@Composable
+private fun TimeShortcut(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    SesameButton(
+        text = text,
+        modifier = modifier,
+        container = Palette.SurfaceHigh,
+        content = Tones.TextSoft,
+        border = Palette.BorderStrong,
+        height = 44.dp,
+        corner = 13.dp,
+        style = SesameText.Caption.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+        onClick = onClick,
+    )
+}
+
 /** DatePicker отдаёт полночь UTC — берём из неё только дату. */
 private fun replaceDate(timestamp: Long, pickedUtcMillis: Long): Long {
     val zone = ZoneId.systemDefault()
@@ -417,7 +802,7 @@ private fun replaceTime(timestamp: Long, hour: Int, minute: Int): Long {
     return localDateOf(timestamp).atTime(hour, minute).atZone(zone).toInstant().toEpochMilli()
 }
 
-@Preview(showBackground = true, heightDp = 1000)
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 private fun HistoryPreview() {
     val now = System.currentTimeMillis()
@@ -430,10 +815,13 @@ private fun HistoryPreview() {
                             id = 1,
                             timestamp = now - 600_000,
                             barrierId = 1,
+                            direction = Direction.IN,
+                            mode = TravelMode.DRIVER,
                             source = LabelSource.WIDGET,
                             outcome = CallOutcome.CALLED,
                         ),
-                        "Шлагбаум A",
+                        "Северный въезд",
+                        0,
                     ),
                     HistoryItem.Session(
                         RecordingSession(
@@ -456,19 +844,23 @@ private fun HistoryPreview() {
                             outcome = CallOutcome.DIALER_FALLBACK,
                             confirmed = true,
                         ),
-                        "Шлагбаум B",
+                        "Южный въезд",
+                        1,
                     ),
                 ),
                 barriers = listOf(
-                    Barrier(id = 1, label = "Шлагбаум A", phoneNumber = null, lat = null, lon = null),
-                    Barrier(id = 2, label = "Шлагбаум B", phoneNumber = null, lat = null, lon = null),
+                    Barrier(id = 1, label = "Шлагбаум A", phoneNumber = null, lat = null, lon = null, name = "Северный въезд"),
+                    Barrier(id = 2, label = "Шлагбаум B", phoneNumber = null, lat = null, lon = null, name = "Южный въезд"),
                 ),
+                unconfirmedCount = 1,
                 unsharedCount = 1,
             ),
+            onFilter = {},
             onDirection = { _, _ -> },
             onMode = { _, _ -> },
             onDiscarded = { _, _ -> },
             onNote = { _, _ -> },
+            onConfirm = {},
             onShare = {},
             onAddManual = { _, _, _, _, _ -> },
             onMessageShown = {},
