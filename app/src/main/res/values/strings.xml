@@ -13,10 +13,8 @@
 
     <!-- Виджет, §4.2 -->
     <string name="widget_label">Сезам: шлагбаумы</string>
+    <!-- Подписи кнопок шлагбаумов берутся из настроек (§4.2), а не из ресурсов. -->
     <string name="widget_description">Открыть шлагбаум A или B и начать интенсивную запись.</string>
-    <string name="widget_barrier_a">Шлагбаум A</string>
-    <string name="widget_barrier_b">Шлагбаум B</string>
-    <string name="widget_record">Запись</string>
 
     <!-- Уведомление сервиса, §9 -->
     <string name="notification_channel_name">Сбор данных</string>

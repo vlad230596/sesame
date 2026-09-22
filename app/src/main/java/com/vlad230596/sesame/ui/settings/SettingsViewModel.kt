@@ -10,6 +10,7 @@ import com.vlad230596.sesame.data.entity.Barrier
 import com.vlad230596.sesame.data.prefs.LocationPriority
 import com.vlad230596.sesame.data.prefs.SesameSettings
 import com.vlad230596.sesame.data.prefs.SettingsRepository
+import com.vlad230596.sesame.widget.WidgetCallCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +44,7 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val barrierRepository: BarrierRepository,
     private val settingsRepository: SettingsRepository,
+    private val widgets: WidgetCallCoordinator,
 ) : ViewModel() {
 
     private data class Local(
@@ -90,7 +92,29 @@ class SettingsViewModel @Inject constructor(
     fun saveBarrier(barrier: Barrier) {
         viewModelScope.launch {
             barrierRepository.save(barrier)
+            // §4.2: подписи кнопок виджета берутся из настроек — виджет обязан
+            // узнать о правке сразу, а не при следующем нажатии.
+            widgets.refresh()
             local.update { it.copy(message = "«${barrier.label}» сохранён") }
+        }
+    }
+
+    /**
+     * Координата дома (§4.4). Дома нет в модели данных §5, поэтому он живёт
+     * отдельными настройками — см. [SesameSettings.homeLat].
+     */
+    fun saveHome(lat: Double?, lon: Double?, radiusMeters: Int) {
+        viewModelScope.launch {
+            settingsRepository.setHome(lat, lon, radiusMeters)
+            local.update {
+                it.copy(
+                    message = if (lat == null || lon == null) {
+                        "Координата дома очищена — геофенс дома не регистрируется"
+                    } else {
+                        "Дом сохранён, геофенс перерегистрирован"
+                    },
+                )
+            }
         }
     }
 

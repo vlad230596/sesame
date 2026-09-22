@@ -79,6 +79,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         SettingsRoute.ROOT -> SettingsContent(
             state = state,
             onSaveBarrier = viewModel::saveBarrier,
+            onSaveHome = viewModel::saveHome,
             onCancelTimeout = viewModel::setCancelTimeout,
             onRecordingMinutes = viewModel::setRecordingMinutes,
             onPhoneAccount = viewModel::setPhoneAccount,
@@ -118,6 +119,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 private fun SettingsContent(
     state: SettingsUiState,
     onSaveBarrier: (Barrier) -> Unit,
+    onSaveHome: (Double?, Double?, Int) -> Unit,
     onCancelTimeout: (Int) -> Unit,
     onRecordingMinutes: (Int) -> Unit,
     onPhoneAccount: (String?) -> Unit,
@@ -158,6 +160,10 @@ private fun SettingsContent(
                 items(state.barriers, key = { it.id }) { barrier ->
                     BarrierEditor(barrier = barrier, onSave = onSaveBarrier)
                 }
+
+                item { SectionTitle("Дом") }
+
+                item { HomeEditor(settings = state.settings, onSave = onSaveHome) }
 
                 item { SectionTitle("Звонок") }
 
@@ -301,6 +307,74 @@ private fun BarrierEditor(barrier: Barrier, onSave: (Barrier) -> Unit) {
     }
 }
 
+/**
+ * Координата дома (§4.4: геофенс 500 м вокруг дома).
+ *
+ * Дома нет в модели данных §5 — там только шлагбаумы, у которых есть номер и
+ * кнопка. Заводить ради одной точки запись в таблице шлагбаумов значило бы
+ * поселить в списке нечто, чему нельзя звонить и что обязано не появиться на
+ * главном экране. Поэтому дом — три настройки, и правятся они здесь.
+ *
+ * Пустые координаты — валидное состояние: геофенс просто не регистрируется.
+ */
+@Composable
+private fun HomeEditor(
+    settings: SesameSettings,
+    onSave: (Double?, Double?, Int) -> Unit,
+) {
+    var lat by remember(settings.homeLat) { mutableStateOf(settings.homeLat?.toString().orEmpty()) }
+    var lon by remember(settings.homeLon) { mutableStateOf(settings.homeLon?.toString().orEmpty()) }
+    var radius by remember(settings.homeRadiusMeters) {
+        mutableStateOf(settings.homeRadiusMeters.toString())
+    }
+
+    val parsedLat = lat.trim().toDoubleOrNull()
+    val parsedLon = lon.trim().toDoubleOrNull()
+    val parsedRadius = radius.trim().toIntOrNull() ?: settings.homeRadiusMeters
+    val dirty = parsedLat != settings.homeLat ||
+        parsedLon != settings.homeLon ||
+        parsedRadius != settings.homeRadiusMeters
+
+    SectionCard(title = "Дом") {
+        Text(
+            "Геофенс вокруг дома. Нужен не для функциональности: по нему " +
+                "проверяется, с какой задержкой Android доставляет фоновые события " +
+                "и не усыпляет ли One UI приложение.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
+            SettingTextField(
+                value = lat,
+                onValueChange = { lat = it },
+                label = "Широта",
+                keyboardType = KeyboardType.Decimal,
+                modifier = Modifier.weight(1f),
+            )
+            SettingTextField(
+                value = lon,
+                onValueChange = { lon = it },
+                label = "Долгота",
+                keyboardType = KeyboardType.Decimal,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        SettingTextField(
+            value = radius,
+            onValueChange = { radius = it },
+            label = "Радиус геофенса, м",
+            keyboardType = KeyboardType.Number,
+            supporting = "По умолчанию 500 м. Пустые координаты — геофенса нет, " +
+                "и это не ошибка",
+        )
+        Button(
+            onClick = { onSave(parsedLat, parsedLon, parsedRadius) },
+            enabled = dirty,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Сохранить") }
+    }
+}
+
 @Composable
 private fun NavigationRow(title: String, subtitle: String, onClick: () -> Unit) {
     SectionCard {
@@ -389,6 +463,7 @@ private fun SettingsPreview() {
                 ),
             ),
             onSaveBarrier = {},
+            onSaveHome = { _, _, _ -> },
             onCancelTimeout = {},
             onRecordingMinutes = {},
             onPhoneAccount = {},

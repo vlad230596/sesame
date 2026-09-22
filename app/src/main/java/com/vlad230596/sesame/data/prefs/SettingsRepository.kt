@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -54,6 +55,21 @@ data class SesameSettings(
      */
     val phoneAccountId: String? = null,
     /**
+     * Координата дома и радиус её геофенса (§4.4: «500 м вокруг дома»).
+     *
+     * Дома нет в модели данных §5 — там только `Barrier`, у которого есть номер
+     * телефона и подпись кнопки. Заводить ради одной точки сущность в Room
+     * значило бы поселить в списке шлагбаумов запись, которой нельзя звонить и
+     * которая обязана не появиться на главном экране. Поэтому дом живёт тремя
+     * плоскими настройками: это ровно одна точка, она правится руками на
+     * телефоне и читается глазами в экспорте настроек.
+     *
+     * `null` — координата не задана, геофенс дома не регистрируется, и это не ошибка.
+     */
+    val homeLat: Double? = null,
+    val homeLon: Double? = null,
+    val homeRadiusMeters: Int = DEFAULT_HOME_RADIUS_METERS,
+    /**
      * Идентификатор незавершённой интенсивной сессии и её плановый конец (§4.3).
      * Лежит в настройках, а не в памяти, чтобы жёсткий предохранитель пережил
      * перезапуск процесса.
@@ -86,6 +102,11 @@ data class SesameSettings(
         const val MIN_BAROMETER_HZ = 1
         const val MAX_BAROMETER_HZ = 10
 
+        /** §4.4: 500 м вокруг дома. */
+        const val DEFAULT_HOME_RADIUS_METERS = 500
+        const val MIN_GEOFENCE_RADIUS_METERS = 50
+        const val MAX_GEOFENCE_RADIUS_METERS = 2_000
+
         /** §7: жёсткий лимит хранилища. */
         const val STORAGE_LIMIT_BYTES = 10L * 1024 * 1024 * 1024
     }
@@ -113,6 +134,9 @@ class SettingsRepository @Inject constructor(
         val AccelerometerHz = intPreferencesKey("accelerometer_hz")
         val BarometerHz = intPreferencesKey("barometer_hz")
         val PhoneAccountId = stringPreferencesKey("phone_account_id")
+        val HomeLat = doublePreferencesKey("home_lat")
+        val HomeLon = doublePreferencesKey("home_lon")
+        val HomeRadius = intPreferencesKey("home_radius_meters")
         val ActiveSessionId = longPreferencesKey("active_session_id")
         val ActiveSessionPlannedEnd = longPreferencesKey("active_session_planned_end")
         val BarriersSeeded = booleanPreferencesKey("barriers_seeded")
@@ -167,6 +191,24 @@ class SettingsRepository @Inject constructor(
         if (value.isNullOrBlank()) it.remove(Keys.PhoneAccountId) else it[Keys.PhoneAccountId] = value
     }
 
+    /**
+     * Координата дома (§4.4). Пустая координата — валидное состояние: геофенс
+     * дома просто не регистрируется.
+     */
+    suspend fun setHome(lat: Double?, lon: Double?, radiusMeters: Int) = edit {
+        if (lat == null || lon == null) {
+            it.remove(Keys.HomeLat)
+            it.remove(Keys.HomeLon)
+        } else {
+            it[Keys.HomeLat] = lat
+            it[Keys.HomeLon] = lon
+        }
+        it[Keys.HomeRadius] = radiusMeters.coerceIn(
+            SesameSettings.MIN_GEOFENCE_RADIUS_METERS,
+            SesameSettings.MAX_GEOFENCE_RADIUS_METERS,
+        )
+    }
+
     suspend fun setActiveSession(id: Long?, plannedEndAt: Long?) = edit {
         if (id == null) {
             it.remove(Keys.ActiveSessionId)
@@ -206,6 +248,9 @@ class SettingsRepository @Inject constructor(
             accelerometerHz = this[Keys.AccelerometerHz] ?: defaults.accelerometerHz,
             barometerHz = this[Keys.BarometerHz] ?: defaults.barometerHz,
             phoneAccountId = this[Keys.PhoneAccountId],
+            homeLat = this[Keys.HomeLat],
+            homeLon = this[Keys.HomeLon],
+            homeRadiusMeters = this[Keys.HomeRadius] ?: defaults.homeRadiusMeters,
             activeSessionId = this[Keys.ActiveSessionId],
             activeSessionPlannedEndAt = this[Keys.ActiveSessionPlannedEnd]?.takeIf { it > 0 },
             barriersSeeded = this[Keys.BarriersSeeded] ?: false,

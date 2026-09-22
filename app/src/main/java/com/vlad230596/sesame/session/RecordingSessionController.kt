@@ -14,6 +14,7 @@ import com.vlad230596.sesame.logging.DataPaths
 import com.vlad230596.sesame.logging.SessionFiles
 import com.vlad230596.sesame.sensors.IntensiveRecorder
 import com.vlad230596.sesame.service.CollectorService
+import com.vlad230596.sesame.widget.WidgetCallCoordinator
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +62,7 @@ class RecordingSessionController @Inject constructor(
     private val settings: SettingsRepository,
     private val paths: DataPaths,
     private val recorder: IntensiveRecorder,
+    private val widgets: WidgetCallCoordinator,
 ) {
 
     /** Переживает смерть вызывающего: страховка ниже не должна отменяться вместе с UI. */
@@ -102,6 +104,9 @@ class RecordingSessionController @Inject constructor(
         settings.setActiveSession(id, now + config.recordingDurationMinutes * 60_000L)
         log(LogEventType.RECORDING_SESSION_STARTED, id, label)
         CollectorService.startSession(context)
+        // §4.2: кнопка записи в виджете показывает состояние записи, а система
+        // сама виджет не перерисует.
+        widgets.refresh()
         return id
     }
 
@@ -161,6 +166,7 @@ class RecordingSessionController @Inject constructor(
             ?: config.activeSessionId?.let { sessionDao.byId(it) }
             ?: sessionDao.observeActive().first()
         settings.setActiveSession(null, null)
+        widgets.refresh()
         if (session == null) return
         if (session.endedAt != null) {
             if (files != null) {

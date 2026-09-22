@@ -102,6 +102,49 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            §4.4. Геофенсы и переходы Activity Recognition.
+
+            Оба приёмника не экспортированы: Play Services будят их нашим же
+            явным PendingIntent, а не неявным броадкастом, поэтому ограничения
+            Android 8 на статические приёмники здесь ни при чём.
+
+            Bluetooth, экран, зарядка и Wi-Fi в манифесте отсутствуют намеренно:
+            их броадкасты статическому приёмнику не доставляются, и они
+            регистрируются в рантайме из сервиса (см. events/SystemEventWatcher).
+        -->
+        <receiver
+            android:name=".events.GeofenceReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.vlad230596.sesame.action.GEOFENCE_EVENT" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".events.ActivityTransitionReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.vlad230596.sesame.action.ACTIVITY_TRANSITION" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            §7. Экспорт файлов через share sheet. Данные лежат в Documents/ и
+            выдаются наружу только временным грантом на конкретный архив.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- §4.2. Glance-виджет: A / B / Запись -->
         <receiver
             android:name=".widget.SesameWidgetReceiver"

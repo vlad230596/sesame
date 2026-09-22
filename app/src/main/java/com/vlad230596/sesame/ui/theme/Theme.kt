@@ -112,14 +112,14 @@ data class SesameAccents(
  * Контраст самой кнопки с фоном: 3.26:1 и 3.22:1 в тёмной теме, 5.22:1 и 5.28:1
  * в светлой.
  */
-private val BarrierAccents = SesameAccents(
+val SesameBarrierAccents = SesameAccents(
     barriers = listOf(
         BarrierAccent(container = Color(0xFFC62E22), onContainer = Color.White),
         BarrierAccent(container = Color(0xFFB23A78), onContainer = Color.White),
     ),
 )
 
-val LocalSesameAccents = staticCompositionLocalOf { BarrierAccents }
+val LocalSesameAccents = staticCompositionLocalOf { SesameBarrierAccents }
 
 /** Доступ к смысловым цветам: `SesameAccentColors.current.barrier(0)`. */
 object SesameAccentColors {
@@ -254,7 +254,7 @@ fun SesameTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
-    CompositionLocalProvider(LocalSesameAccents provides BarrierAccents) {
+    CompositionLocalProvider(LocalSesameAccents provides SesameBarrierAccents) {
         MaterialTheme(
             colorScheme = if (darkTheme) DarkColors else LightColors,
             typography = SesameTypography,

@@ -19,6 +19,9 @@ import com.vlad230596.sesame.data.LogEventType
 import com.vlad230596.sesame.data.dao.RecordingSessionDao
 import com.vlad230596.sesame.data.prefs.SesameSettings
 import com.vlad230596.sesame.data.prefs.SettingsRepository
+import com.vlad230596.sesame.events.ActivityRecognitionWatcher
+import com.vlad230596.sesame.events.GeofenceWatcher
+import com.vlad230596.sesame.events.SystemEventWatcher
 import com.vlad230596.sesame.logging.DataFileStore
 import com.vlad230596.sesame.sensors.IntensiveRecorder
 import com.vlad230596.sesame.sensors.PassiveSensorCollector
@@ -63,6 +66,12 @@ class CollectorService : android.app.Service() {
     @Inject lateinit var sessionDao: RecordingSessionDao
 
     @Inject lateinit var journal: CollectorJournal
+
+    @Inject lateinit var systemEvents: SystemEventWatcher
+
+    @Inject lateinit var geofences: GeofenceWatcher
+
+    @Inject lateinit var activityRecognition: ActivityRecognitionWatcher
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var guardJob: Job? = null
@@ -112,6 +121,12 @@ class CollectorService : android.app.Service() {
                 sessions.finishSessionAsync(files, "service_destroyed")
             }
         }
+        // Динамическую регистрацию надо снять, иначе приёмник утечёт вместе с
+        // контекстом сервиса. Геофенсы и Activity Recognition, наоборот,
+        // остаются: их ценность именно в срабатывании, когда нас нет.
+        systemEvents.stop()
+        geofences.stopWatching()
+
         passive.stop()
         store.shutdown()
         store.onPassiveDayRotated = null
@@ -129,6 +144,17 @@ class CollectorService : android.app.Service() {
             journal.log(LogEventType.PASSIVE_DAY_ROTATED, mapOf("publishedDir" to dir))
         }
         store.start()
+
+        // §4.4. Журнал событий пишется всегда и стоит почти ноль, поэтому он
+        // поднимается вместе со сбором и не зависит от разрешений: чего не
+        // хватило, будет видно в самом журнале.
+        systemEvents.start()
+        // Геофенсы и переходы активности живут в системе, а не в процессе, и при
+        // остановке сервиса не снимаются; перезагрузка их стирает, поэтому
+        // регистрация повторяется на каждом старте сбора.
+        geofences.start()
+        activityRecognition.start()
+
         scope.launch {
             val config = settings.current()
             passive.start(config)
@@ -173,6 +199,11 @@ class CollectorService : android.app.Service() {
         guardJob = scope.launch {
             while (isActive) {
                 delay(GUARD_INTERVAL_MILLIS)
+                // Дешёвая повторная попытка: разрешение «Разрешить всегда»
+                // могли выдать уже после старта сбора, и без неё геофенсы
+                // молчали бы до перезапуска сервиса.
+                geofences.retry()
+                activityRecognition.retry()
                 val config = runCatching { settings.current() }.getOrNull() ?: continue
                 val id = config.activeSessionId ?: continue
                 val plannedEnd = plannedEndOf(config, id) ?: continue

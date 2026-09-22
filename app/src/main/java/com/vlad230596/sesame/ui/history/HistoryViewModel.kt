@@ -11,10 +11,12 @@ import com.vlad230596.sesame.data.dao.RecordingSessionDao
 import com.vlad230596.sesame.data.entity.Barrier
 import com.vlad230596.sesame.data.entity.PassageLabel
 import com.vlad230596.sesame.data.entity.RecordingSession
+import com.vlad230596.sesame.logging.SessionExporter
 import com.vlad230596.sesame.ui.common.formatBytes
-import com.vlad230596.sesame.ui.common.formatDateTime
-import com.vlad230596.sesame.ui.common.title
+import com.vlad230596.sesame.ui.common.plural
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +53,8 @@ sealed interface HistoryItem {
 data class ShareRequest(
     val intent: Intent,
     val sessionIds: List<Long>,
+    /** Что именно уходит — для подписи под кнопкой и для снекбара. */
+    val description: String = "",
 )
 
 data class HistoryUiState(
@@ -58,6 +62,8 @@ data class HistoryUiState(
     val barriers: List<Barrier> = emptyList(),
     val unsharedCount: Int = 0,
     val shareRequest: ShareRequest? = null,
+    /** Идёт сборка архива: кнопка «Поделиться» на это время блокируется. */
+    val preparing: Boolean = false,
     val message: String? = null,
 )
 
@@ -65,11 +71,13 @@ data class HistoryUiState(
 class HistoryViewModel @Inject constructor(
     private val passageLabels: PassageLabelRepository,
     private val sessionDao: RecordingSessionDao,
+    private val exporter: SessionExporter,
     barrierRepository: BarrierRepository,
 ) : ViewModel() {
 
     private data class Local(
         val shareRequest: ShareRequest? = null,
+        val preparing: Boolean = false,
         val message: String? = null,
     )
 
@@ -92,6 +100,7 @@ class HistoryViewModel @Inject constructor(
             barriers = barriers,
             unsharedCount = sessions.count { !it.shared && it.endedAt != null },
             shareRequest = l.shareRequest,
+            preparing = l.preparing,
             message = l.message,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryUiState())
@@ -130,38 +139,49 @@ class HistoryViewModel @Inject constructor(
     }
 
     /**
-     * «Поделиться непошаренным» (§7).
+     * «Поделиться непошаренным» (§7) — отправка самих файлов.
      *
-     * Основной способ забрать данные — USB: файлы лежат в `Documents/Sesame/`
-     * и видны с компьютера без дополнительных действий. Поэтому в share sheet
-     * уходит текстовая опись незашаренных сессий с путями к их каталогам и
-     * объёмом — она отвечает на вопрос «что именно ещё не забрано», а не
-     * пытается протащить через мессенджер десятки мегабайт gzip-CSV.
+     * Основной способ забрать данные остаётся прежним: USB, файлы лежат в
+     * `Documents/Sesame/` и видны с компьютера без дополнительных действий.
+     * Share sheet — второй путь, и он отдаёт архив с потоками датчиков и
+     * манифестами, а не их опись. Сборка архива идёт в IO: сотни мегабайт
+     * копируются не мгновенно, и держать на это UI-поток нельзя.
+     *
+     * Флаг `shared` ставится только в [onShareLaunched], то есть после того, как
+     * share sheet действительно открылся. Иначе одна осечка интента навсегда
+     * пометила бы сессии выгруженными, и в следующий раз кнопка их не предложила
+     * бы — при том, что данные никуда не ушли.
      */
     fun requestShare() {
+        if (local.value.preparing) return
         viewModelScope.launch {
             val unshared = sessionDao.unshared()
             if (unshared.isEmpty()) {
                 local.update { it.copy(message = "Нечего выгружать: всё уже отмечено как выгруженное") }
                 return@launch
             }
-            val text = buildString {
-                appendLine("Сезам: сессии, ещё не выгруженные (${unshared.size})")
-                unshared.forEach { session ->
-                    append(formatDateTime(session.startedAt))
-                    append(" · ").append(session.label.title())
-                    append(" · ").append(formatBytes(session.sizeBytes))
-                    session.fileDir?.let { append(" · ").append(it) }
-                    appendLine()
+            local.update { it.copy(preparing = true, message = "Собираю архив…") }
+            val bundle = withContext(Dispatchers.IO) { exporter.buildBundle(unshared) }
+            if (bundle == null) {
+                local.update {
+                    it.copy(
+                        preparing = false,
+                        message = "Файлы сессий не найдены. Проверьте Documents/Sesame/",
+                    )
                 }
-            }
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_SUBJECT, "Сезам: сессии записи")
-                putExtra(Intent.EXTRA_TEXT, text)
+                return@launch
             }
             local.update {
-                it.copy(shareRequest = ShareRequest(intent, unshared.map { s -> s.id }))
+                it.copy(
+                    preparing = false,
+                    shareRequest = ShareRequest(
+                        intent = exporter.shareIntent(bundle),
+                        sessionIds = bundle.sessionIds,
+                        description = "${bundle.fileName} · ${bundle.fileCount} " +
+                            "${plural(bundle.fileCount.toLong(), "файл", "файла", "файлов")} · " +
+                            formatBytes(bundle.sizeBytes),
+                    ),
+                )
             }
         }
     }
@@ -173,7 +193,7 @@ class HistoryViewModel @Inject constructor(
             local.update {
                 it.copy(
                     shareRequest = null,
-                    message = "Отмечено выгруженным: ${sessionIds.size}",
+                    message = "Отправлено и отмечено выгруженным: ${sessionIds.size}",
                 )
             }
         }

@@ -1,5 +1,6 @@
 package com.vlad230596.sesame.ui
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,7 +17,9 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -40,14 +43,46 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    /**
+     * Запрос с виджета (§4.2): кнопка записи открывает экран выбора метки
+     * сессии (§4.3). Активность `singleTask`, поэтому повторное нажатие приходит
+     * в [onNewIntent], а не в [onCreate], и обрабатывать надо оба пути.
+     */
+    private var startSessionRequests by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        consume(intent)
         setContent {
             SesameTheme {
-                SesameApp()
+                SesameApp(
+                    startSessionRequest = startSessionRequests,
+                    onStartSessionHandled = { startSessionRequests = 0 },
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consume(intent)
+    }
+
+    /**
+     * Интент обезвреживается сразу: иначе поворот экрана или возврат из фона
+     * снова открывал бы выбор метки, хотя пользователь его уже закрыл.
+     */
+    private fun consume(intent: Intent?) {
+        if (intent?.action != ACTION_START_SESSION) return
+        intent.action = null
+        startSessionRequests++
+    }
+
+    companion object {
+        /** Открыть выбор метки интенсивной сессии (§4.3). Шлёт виджет. */
+        const val ACTION_START_SESSION = "com.vlad230596.sesame.action.OPEN_SESSION_PICKER"
     }
 }
 
@@ -61,8 +96,17 @@ private enum class SesameTab(
 }
 
 @Composable
-private fun SesameApp() {
+private fun SesameApp(
+    startSessionRequest: Int = 0,
+    onStartSessionHandled: () -> Unit = {},
+) {
     var selected by rememberSaveable { mutableStateOf(SesameTab.HOME) }
+
+    // Выбор метки живёт на главной: переключаем вкладку, иначе запрос с виджета
+    // ушёл бы в невидимую композицию, если приложение свернули на «Истории».
+    LaunchedEffect(startSessionRequest) {
+        if (startSessionRequest > 0) selected = SesameTab.HOME
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -84,7 +128,11 @@ private fun SesameApp() {
             .padding(bottom = innerPadding.calculateBottomPadding())
 
         when (selected) {
-            SesameTab.HOME -> HomeScreen(contentModifier)
+            SesameTab.HOME -> HomeScreen(
+                modifier = contentModifier,
+                startSessionRequest = startSessionRequest,
+                onStartSessionHandled = onStartSessionHandled,
+            )
             SesameTab.HISTORY -> HistoryScreen(contentModifier)
             SesameTab.SETTINGS -> SettingsScreen(contentModifier)
         }

@@ -77,7 +77,11 @@ import com.vlad230596.sesame.ui.theme.SesameTheme
  * не умер.
  */
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun HomeScreen(
+    modifier: Modifier = Modifier,
+    startSessionRequest: Int = 0,
+    onStartSessionHandled: () -> Unit = {},
+) {
     val viewModel: HomeViewModel = hiltViewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -88,6 +92,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 
     HomeContent(
         state = state,
+        startSessionRequest = startSessionRequest,
+        onStartSessionHandled = onStartSessionHandled,
         onBarrierPressed = viewModel::onBarrierPressed,
         onCancelCountdown = viewModel::cancelCountdown,
         onStartSession = viewModel::startSession,
@@ -123,11 +129,22 @@ private fun HomeContent(
     onConfirmAll: () -> Unit,
     onMessageShown: () -> Unit,
     modifier: Modifier = Modifier,
+    startSessionRequest: Int = 0,
+    onStartSessionHandled: () -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var labelPickerVisible by remember { mutableStateOf(false) }
     var permissionsVisible by remember { mutableStateOf(false) }
     var unconfirmedVisible by remember { mutableStateOf(false) }
+
+    // §4.2: кнопка записи в виджете открывает экран выбора метки сессии. Если
+    // сессия уже идёт, открывать нечего — вторую запускать нельзя, и на экране
+    // и так виден её таймер.
+    LaunchedEffect(startSessionRequest, state.session != null) {
+        if (startSessionRequest <= 0) return@LaunchedEffect
+        if (state.session == null) labelPickerVisible = true
+        onStartSessionHandled()
+    }
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect

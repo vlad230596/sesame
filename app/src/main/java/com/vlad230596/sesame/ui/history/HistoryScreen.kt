@@ -87,7 +87,10 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
         val request = state.shareRequest ?: return@LaunchedEffect
         val started = runCatching {
             context.startActivity(
-                android.content.Intent.createChooser(request.intent, "Выгрузить сессии"),
+                android.content.Intent.createChooser(
+                    request.intent,
+                    request.description.ifBlank { "Выгрузить сессии" },
+                ),
             )
         }.isSuccess
         if (started) viewModel.onShareLaunched(request.sessionIds) else viewModel.onShareFailed()
@@ -137,7 +140,7 @@ private fun HistoryContent(
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             TabHeader("История") {
-                IconButton(onClick = onShare) {
+                IconButton(onClick = onShare, enabled = !state.preparing) {
                     Icon(Icons.Filled.Share, contentDescription = "Поделиться непошаренным")
                 }
                 IconButton(onClick = { manualVisible = true }) {
@@ -159,8 +162,21 @@ private fun HistoryContent(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
                     ) {
-                        OutlinedButton(onClick = onShare, modifier = Modifier.weight(1f)) {
-                            Text("Поделиться (${state.unsharedCount})")
+                        OutlinedButton(
+                            onClick = onShare,
+                            enabled = !state.preparing,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            // §7: архив собирается из файлов, а не из описи, и на
+                            // сотнях мегабайт это заметное время — кнопка обязана
+                            // сказать, что она занята.
+                            Text(
+                                if (state.preparing) {
+                                    "Собираю архив…"
+                                } else {
+                                    "Поделиться (${state.unsharedCount})"
+                                },
+                            )
                         }
                         OutlinedButton(
                             onClick = { manualVisible = true },
