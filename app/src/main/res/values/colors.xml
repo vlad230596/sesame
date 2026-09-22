@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#1B2C38</color>
-    <color name="widget_background">#FF1B2C38</color>
+
+    <!-- Фон макета. Дублируется здесь ради windowBackground: XML-тему не
+         достать из Compose-палитры. -->
+    <color name="sesame_background">#0E0F12</color>
+
+    <!-- Подложка виджета до первой отрисовки Glance. -->
+    <color name="widget_background">#F2191B20</color>
 </resources>

@@ -24,6 +24,9 @@ object DatabaseModule {
         @ApplicationContext context: Context,
     ): AppDatabase = Room
         .databaseBuilder(context, AppDatabase::class.java, AppDatabase.NAME)
+        // Деструктивного отката здесь нет намеренно: в базе лежит датасет,
+        // который собирается месяцами.
+        .addMigrations(AppDatabase.MIGRATION_1_2)
         .build()
 
     @Provides

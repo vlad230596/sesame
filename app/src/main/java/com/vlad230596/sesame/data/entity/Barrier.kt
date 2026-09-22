@@ -13,13 +13,28 @@ import androidx.room.PrimaryKey
 data class Barrier(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
+    /**
+     * Техническое обозначение: «Шлагбаум A». Им подписаны записи в журнале, в
+     * истории и в уведомлениях — там нужна однозначность, а не красота.
+     */
     val label: String,
     val phoneNumber: String?,
     val lat: Double?,
     val lon: Double?,
     val radiusMeters: Float = DEFAULT_RADIUS_METERS,
     val orderIndex: Int = 0,
+    /**
+     * Человеческое имя въезда: «Северный въезд».
+     *
+     * Отдельное поле, а не переименованный [label]: на кнопке за рулём читается
+     * место («северный»), а в журнале — позиция («A»), и это разные строки.
+     * Пустое значение — валидное состояние: UI показывает тогда [label].
+     */
+    val name: String = "",
 ) {
+    /** Что писать на кнопке крупно. */
+    val displayName: String get() = name.ifBlank { label }
+
     companion object {
         /** §4.4: по 100 м вокруг каждого шлагбаума. */
         const val DEFAULT_RADIUS_METERS: Float = 100f

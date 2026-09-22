@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Sesame" parent="@android:style/Theme.DeviceDefault.DayNight">
+    <!--
+        Приложение зафиксировано в тёмной теме (см. SesameTheme): весь макет
+        построен на фоне #0E0F12, и янтарная с бирюзовой кнопки рассчитаны
+        именно на него. Поэтому родитель без DayNight, а фон окна — цвет фона
+        макета: иначе при холодном старте между сплэшем и первым кадром Compose
+        мелькает белый прямоугольник.
+    -->
+    <style name="Theme.Sesame" parent="@android:style/Theme.DeviceDefault">
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
-        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/sesame_background</item>
+        <item name="android:forceDarkAllowed">false</item>
     </style>
 </resources>

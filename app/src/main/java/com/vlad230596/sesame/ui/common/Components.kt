@@ -48,19 +48,19 @@ fun SectionCard(
     contentPadding: androidx.compose.ui.unit.Dp = Dimens.SpaceM,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
+    // Плоская карточка макета: фон и волосяная граница вместо тени. На фоне
+    // #0E0F12 тень не видна вовсе, а граница — видна.
+    SesameSurface(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = containerColor,
-            contentColor = contentColor,
-        ),
+        color = containerColor,
+        contentColor = contentColor,
     ) {
         Column(
             modifier = Modifier.padding(contentPadding),
             verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
         ) {
             if (title != null) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(title, style = MaterialTheme.typography.titleMedium, color = contentColor)
             }
             content()
         }

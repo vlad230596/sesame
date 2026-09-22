@@ -6,6 +6,7 @@ import androidx.glance.action.ActionParameters
 import androidx.glance.appwidget.action.ActionCallback
 import com.vlad230596.sesame.call.CallBarrierUseCase
 import com.vlad230596.sesame.data.BarrierRepository
+import com.vlad230596.sesame.data.dao.LogEventDao
 import com.vlad230596.sesame.data.dao.RecordingSessionDao
 import com.vlad230596.sesame.data.prefs.SettingsRepository
 import dagger.hilt.EntryPoint
@@ -29,6 +30,9 @@ interface WidgetEntryPoint {
     fun settings(): SettingsRepository
     fun callBarrier(): CallBarrierUseCase
     fun sessions(): RecordingSessionDao
+
+    /** "Последнее фоновое событие" в шапке виджета: сбор жив или нет. */
+    fun logEvents(): LogEventDao
 }
 
 internal fun widgetEntryPoint(context: Context): WidgetEntryPoint =

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Стрела шлагбаума для виджета. Тот же контур, что SesameIcons.BoomGate в
+    приложении: в Glance нет ImageVector, и рисовать иконку приходится ресурсом.
+    Цвет задаётся тинтом при отрисовке — здесь он чёрный только чтобы контур
+    был виден в предпросмотре студии.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="36dp"
+    android:height="36dp"
+    android:viewportWidth="36"
+    android:viewportHeight="36">
+
+    <!-- Стойка. -->
+    <path
+        android:pathData="M8,31 V13"
+        android:strokeColor="#000000"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round" />
+
+    <!-- Шарнир. -->
+    <path
+        android:pathData="M4.5,9.5 a3.5,3.5 0 1,1 7,0 a3.5,3.5 0 1,1 -7,0 z"
+        android:strokeColor="#000000"
+        android:strokeWidth="2.6"
+        android:strokeLineJoin="round" />
+
+    <!-- Штанга. -->
+    <path
+        android:pathData="M14.7,15.5 L29.8,15.5 a2.2,2.2 0 0,1 2.2,2.2 L32,20.8 a2.2,2.2 0 0,1 -2.2,2.2 L14.7,23 a2.2,2.2 0 0,1 -2.2,-2.2 L12.5,17.7 a2.2,2.2 0 0,1 2.2,-2.2 z"
+        android:strokeColor="#000000"
+        android:strokeWidth="2.6"
+        android:strokeLineJoin="round" />
+
+    <!-- Косые полосы. -->
+    <path
+        android:pathData="M19,15.5 l-4,7.5 M25,15.5 l-4,7.5 M31,15.5 l-4,7.5"
+        android:strokeColor="#000000"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round" />
+</vector>

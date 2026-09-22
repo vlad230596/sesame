@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Golos Text, вес 500. Файл один — переменный шрифт; экземпляр веса задаётся
+    осью wght. Отдельный ресурс на вес нужен для Compose: Font(resId, weight)
+    грузит ресурс целиком, и внутри семейства из нескольких начертаний вес уже
+    не выбирается.
+-->
+<font-family xmlns:android="http://schemas.android.com/apk/res/android">
+    <font
+        android:font="@font/golos_text_variable"
+        android:fontStyle="normal"
+        android:fontWeight="500"
+        android:fontVariationSettings="'wght' 500" />
+</font-family>

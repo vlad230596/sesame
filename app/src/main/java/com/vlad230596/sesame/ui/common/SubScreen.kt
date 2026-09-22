@@ -1,20 +1,27 @@
 package com.vlad230596.sesame.ui.common
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.vlad230596.sesame.ui.theme.Dimens
+import com.vlad230596.sesame.ui.theme.Palette
+import com.vlad230596.sesame.ui.theme.SesameText
 
 /**
  * Оболочка вложенного экрана: заголовок и стрелка «назад».
@@ -22,8 +29,11 @@ import androidx.compose.ui.text.style.TextOverflow
  * Вкладки живут в [com.vlad230596.sesame.ui.MainActivity] без NavHost, поэтому
  * вложенные экраны настроек — это состояние внутри вкладки, а не отдельный
  * маршрут. Для двух экранов это честнее целого графа навигации.
+ *
+ * Шапка своя, а не `TopAppBar`: у материальной свои высота, кегль и фон с
+ * тональной подсветкой при прокрутке — на макете шапка это просто строка
+ * на фоне экрана.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubScreenScaffold(
     title: String,
@@ -31,33 +41,55 @@ fun SubScreenScaffold(
     modifier: Modifier = Modifier,
     content: @Composable (Modifier) -> Unit,
 ) {
-    Column(modifier = modifier.fillMaxSize()) {
-        TopAppBar(
-            title = {
-                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            },
-            navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.background,
-            ),
-        )
-        content(Modifier.padding(horizontal = com.vlad230596.sesame.ui.theme.Dimens.ScreenPadding))
+    Column(modifier = modifier.fillMaxSize().background(Palette.Background)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = Dimens.SpaceS, end = Dimens.ScreenPadding, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceXs),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Назад",
+                    tint = Palette.TextPrimary,
+                    modifier = Modifier.size(Dimens.NavIcon),
+                )
+            }
+            Text(
+                text = title,
+                style = SesameText.ScreenTitle,
+                color = Palette.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        content(Modifier.padding(horizontal = Dimens.ScreenPadding))
     }
 }
 
-/** Заголовок корневого экрана вкладки. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Заголовок корневого экрана вкладки — тот же, что «Сезам» на главной. */
 @Composable
 fun TabHeader(title: String, actions: @Composable () -> Unit = {}) {
-    TopAppBar(
-        title = { Text(title) },
-        actions = { actions() },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.background,
-        ),
-    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(
+                start = Dimens.ScreenPadding,
+                end = Dimens.ScreenPadding,
+                top = 24.dp,
+                bottom = 14.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = SesameText.ScreenTitle, color = Palette.TextPrimary)
+        Row(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) { actions() }
+    }
 }

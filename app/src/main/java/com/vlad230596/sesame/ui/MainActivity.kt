@@ -3,32 +3,31 @@ package com.vlad230596.sesame.ui
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.tooling.preview.Preview
+import com.vlad230596.sesame.ui.common.SesameBottomBar
+import com.vlad230596.sesame.ui.common.SesameBottomBarItem
+import com.vlad230596.sesame.ui.common.SesameIcons
 import com.vlad230596.sesame.ui.history.HistoryScreen
 import com.vlad230596.sesame.ui.home.HomeScreen
 import com.vlad230596.sesame.ui.settings.SettingsScreen
+import com.vlad230596.sesame.ui.theme.Palette
 import com.vlad230596.sesame.ui.theme.SesameTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -37,8 +36,8 @@ import dagger.hilt.android.AndroidEntryPoint
  * Настройки.
  *
  * Этот файл держит только навигационную оболочку и ничего не знает о содержимом
- * вкладок: каждый экран живёт в своём пакете, сам рисует свой заголовок и
- * получает Modifier с padding от Scaffold.
+ * вкладок: каждый экран живёт в своём пакете, сам рисует свой заголовок и сам
+ * разбирается со своими отступами.
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -51,7 +50,11 @@ class MainActivity : ComponentActivity() {
     private var startSessionRequests by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        // Тема у приложения одна — тёмная (см. SesameTheme), поэтому системные
+        // полосы задаются явно светлым содержимым на прозрачном фоне, а не
+        // отдаются на откуп ночному режиму системы.
+        val bars = SystemBarStyle.dark(Palette.Background.toArgb())
+        enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
         super.onCreate(savedInstanceState)
         consume(intent)
         setContent {
@@ -90,9 +93,9 @@ private enum class SesameTab(
     val title: String,
     val icon: ImageVector,
 ) {
-    HOME("Главная", Icons.Filled.Home),
-    HISTORY("История", Icons.Filled.DateRange),
-    SETTINGS("Настройки", Icons.Filled.Settings),
+    HOME("Главная", SesameIcons.Home),
+    HISTORY("История", SesameIcons.History),
+    SETTINGS("Настройки", SesameIcons.Settings),
 }
 
 @Composable
@@ -108,24 +111,16 @@ private fun SesameApp(
         if (startSessionRequest > 0) selected = SesameTab.HOME
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        bottomBar = {
-            NavigationBar {
-                SesameTab.entries.forEach { tab ->
-                    NavigationBarItem(
-                        selected = tab == selected,
-                        onClick = { selected = tab },
-                        icon = { Icon(tab.icon, contentDescription = null) },
-                        label = { Text(tab.title) },
-                    )
-                }
-            }
-        },
-    ) { innerPadding ->
-        val contentModifier = Modifier
+    // Scaffold здесь больше не нужен: своя нижняя полоса и экраны, которые сами
+    // считают свои отступы, дешевле, чем перекрывать material-овские умолчания.
+    Column(
+        modifier = Modifier
             .fillMaxSize()
-            .padding(bottom = innerPadding.calculateBottomPadding())
+            .background(Palette.Background),
+    ) {
+        val contentModifier = Modifier
+            .fillMaxWidth()
+            .weight(1f)
 
         when (selected) {
             SesameTab.HOME -> HomeScreen(
@@ -136,10 +131,21 @@ private fun SesameApp(
             SesameTab.HISTORY -> HistoryScreen(contentModifier)
             SesameTab.SETTINGS -> SettingsScreen(contentModifier)
         }
+
+        SesameBottomBar {
+            SesameTab.entries.forEach { tab ->
+                SesameBottomBarItem(
+                    icon = tab.icon,
+                    label = tab.title,
+                    selected = tab == selected,
+                    onClick = { selected = tab },
+                )
+            }
+        }
     }
 }
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 private fun SesameAppPreview() {
     SesameTheme {

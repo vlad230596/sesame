@@ -41,6 +41,7 @@ class BarrierRepository @Inject constructor(
             return
         }
         DEFAULT_LABELS.drop(existing).forEachIndexed { index, label ->
+            val position = existing + index
             dao.insert(
                 Barrier(
                     label = label,
@@ -48,7 +49,8 @@ class BarrierRepository @Inject constructor(
                     lat = null,
                     lon = null,
                     radiusMeters = Barrier.DEFAULT_RADIUS_METERS,
-                    orderIndex = existing + index,
+                    orderIndex = position,
+                    name = DEFAULT_NAMES.getOrElse(position) { label },
                 ),
             )
         }
@@ -57,5 +59,12 @@ class BarrierRepository @Inject constructor(
 
     companion object {
         val DEFAULT_LABELS = listOf("Шлагбаум A", "Шлагбаум B")
+
+        /**
+         * Имя въезда по умолчанию. Это заведомо угадка — правится в настройках, —
+         * но пустая крупная строка на главной кнопке хуже неточной: кнопка должна
+         * читаться местом, а не буквой.
+         */
+        val DEFAULT_NAMES = listOf("Северный въезд", "Южный въезд")
     }
 }

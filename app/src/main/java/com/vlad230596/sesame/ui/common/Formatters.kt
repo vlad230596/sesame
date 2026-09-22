@@ -63,6 +63,24 @@ fun formatAgo(epochMillis: Long?, now: Long = System.currentTimeMillis()): Strin
     }
 }
 
+/**
+ * То же самое для шапки экрана и виджета: «4 мин назад».
+ *
+ * Короткая форма нужна там, где строка стоит рядом с заголовком и набрана
+ * моноширинным: «4 минуты назад» и «15 минут назад» разной длины дёргали бы
+ * шапку при каждом обновлении.
+ */
+fun formatAgoShort(epochMillis: Long?, now: Long = System.currentTimeMillis()): String {
+    if (epochMillis == null || epochMillis <= 0) return "нет событий"
+    val minutes = ((now - epochMillis) / 60_000L).coerceAtLeast(0)
+    return when {
+        minutes < 1 -> "только что"
+        minutes < 60 -> "$minutes мин назад"
+        minutes < 60 * 24 -> "${minutes / 60} ч назад"
+        else -> "${minutes / (60 * 24)} дн назад"
+    }
+}
+
 fun formatDuration(millis: Long): String {
     val totalSeconds = (millis / 1000).coerceAtLeast(0)
     val hours = totalSeconds / 3600
@@ -77,11 +95,36 @@ fun formatDuration(millis: Long): String {
 fun formatMinutes(minutes: Int): String =
     "$minutes ${plural(minutes.toLong(), "минута", "минуты", "минут")}"
 
+/**
+ * Объём для строки «занято 2,3 из 10 ГБ».
+ *
+ * Дробная часть отбрасывается, когда она нулевая: лимит хранилища — ровно 10 ГБ,
+ * и «10,00 ГБ» рядом с «2,3 ГБ» читается как измеренная величина, хотя это
+ * константа. Запятая, а не точка: строка русская и набрана рядом с обычным
+ * текстом.
+ */
 fun formatBytes(bytes: Long): String = when {
     bytes < 1024 -> "$bytes Б"
-    bytes < 1024L * 1024 -> "%.0f КБ".format(bytes / 1024.0)
-    bytes < 1024L * 1024 * 1024 -> "%.1f МБ".format(bytes / (1024.0 * 1024))
-    else -> "%.2f ГБ".format(bytes / (1024.0 * 1024 * 1024))
+    bytes < 1024L * 1024 -> "%.0f КБ".format(RU, bytes / 1024.0)
+    bytes < 1024L * 1024 * 1024 -> "%.1f МБ".format(RU, bytes / (1024.0 * 1024)).trimZero()
+    else -> "%.1f ГБ".format(RU, bytes / (1024.0 * 1024 * 1024)).trimZero()
+}
+
+private fun String.trimZero(): String = replace(",0 ", " ")
+
+/**
+ * Номер шлагбаума для главного экрана и виджета: `+7 ··· ·· 14`.
+ *
+ * Домашний экран и виджет видно посторонним — через плечо, на столе, на чужом
+ * скриншоте, — а номер шлагбаума это фактически ключ от двора. Хвоста в две
+ * цифры хватает, чтобы отличить один шлагбаум от другого глазами; целиком номер
+ * остаётся только в настройках, где его правят.
+ */
+fun maskPhone(phone: String?): String? {
+    val digits = phone?.filter { it.isDigit() } ?: return null
+    if (digits.length < 3) return null
+    val country = if (phone.trimStart().startsWith("+")) "+${digits.first()} " else ""
+    return "$country··· ·· ${digits.takeLast(2)}"
 }
 
 fun plural(value: Long, one: String, few: String, many: String): String {

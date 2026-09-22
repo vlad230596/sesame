@@ -1,18 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    §4.2. Три кнопки одна под другой: цвет закреплён за позицией — верхняя
-    кнопка красная, нижняя малиновая, — поэтому виджет вертикальный, а не
-    строчка. Высота по умолчанию рассчитана на две крупные кнопки шлагбаумов
-    плюс узкую кнопку записи: попасть в шлагбаум надо одним движением, не
-    приглядываясь.
+    §4.2, по макету виджета: строка состояния, две кнопки шлагбаумов рядом и
+    узкая строка записи. Цвет закреплён за позицией — левая кнопка янтарная,
+    правая бирюзовая, — поэтому кнопки стоят в ряд и попасть в нужную можно по
+    цветному пятну, не читая подпись.
+
+    Четыре клетки в ширину и две в высоту: две кнопки по 92 dp рядом требуют
+    ширины, а высоты виджету нужно ровно столько, сколько занимают кнопка и
+    строка записи.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_description"
     android:initialLayout="@layout/glance_default_loading_layout"
-    android:minWidth="180dp"
-    android:minHeight="150dp"
-    android:targetCellWidth="3"
-    android:targetCellHeight="3"
+    android:minWidth="250dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="0"
     android:widgetCategory="home_screen" />
