@@ -88,9 +88,27 @@ class DataFileStore @Inject constructor(
     @Volatile
     private var passiveManifestProvider: (() -> ManifestDraft)? = null
 
-    /** Стык суток пассивного слоя — отметка в журнале событий (§4.4). */
+    /**
+     * Стык суток пассивного слоя — отметка в журнале событий (§4.4) и выгрузка
+     * журнала за закрывшиеся сутки (§7). Зовётся на каждой полуночи, даже если
+     * пассивных файлов за сутки не было: тогда [publishedDir] — `null`, а события
+     * журнала за эти сутки всё равно могли накопиться.
+     *
+     * Вызывается из потока записи — обработчик не должен в нём задерживаться.
+     */
     @Volatile
-    var onPassiveDayRotated: ((publishedDir: String) -> Unit)? = null
+    var onPassiveDayRotated: ((finishedDate: LocalDate, publishedDir: String?) -> Unit)? = null
+
+    /**
+     * Тик промежуточной публикации текущих суток, раз в
+     * [PASSIVE_PUBLISH_INTERVAL_MILLIS]. Журнал событий живёт в Room, а не в этом
+     * классе, но публикуется в том же ритме: отдельный таймер ради него дал бы
+     * второй источник «когда что лежит в `Documents/Sesame/`».
+     *
+     * Вызывается из потока записи — обработчик не должен в нём задерживаться.
+     */
+    @Volatile
+    var onPublishTick: (() -> Unit)? = null
 
     // --- состояние потока записи ---------------------------------------------------
 
@@ -393,6 +411,8 @@ class DataFileStore @Inject constructor(
         if (now - lastPassivePublishAt >= PASSIVE_PUBLISH_INTERVAL_MILLIS) {
             lastPassivePublishAt = now
             publishPassiveSnapshot()
+            runCatching { onPublishTick?.invoke() }
+                .onFailure { Log.w(TAG, "Обработчик тика публикации упал", it) }
         }
     }
 
@@ -495,10 +515,12 @@ class DataFileStore @Inject constructor(
 
     /** §5: ротация пассивных файлов — посуточная. */
     private fun rotatePassive(now: Long) {
+        val finishedDate = DataPaths.localDate(passiveDayEndMillis - 1)
         val closing = passive?.publishedDir
         closePassiveInternal(publish = true)
         passiveDayEndMillis = DataPaths.nextMidnightMillis(now)
-        if (closing != null) runCatching { onPassiveDayRotated?.invoke(closing) }
+        runCatching { onPassiveDayRotated?.invoke(finishedDate, closing) }
+            .onFailure { Log.w(TAG, "Обработчик ротации суток упал", it) }
         // Новые сутки откроются на первом же отсчёте: пустой каталог заводить незачем.
     }
 

@@ -311,7 +311,7 @@ class HomeViewModel @Inject constructor(
         if (session.id == lastAutoStoppedSessionId) return
         if (System.currentTimeMillis() >= session.plannedEndAt) {
             lastAutoStoppedSessionId = session.id
-            sessions.stop()
+            sessions.stop(reason = CollectorService.STOP_REASON_TIMER)
             local.update { it.copy(message = "Запись остановлена по таймеру") }
         }
     }

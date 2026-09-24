@@ -77,6 +77,7 @@ class SessionExporter @Inject constructor(
         val archive = File(dir, "sesame-sessions-$stamp.zip")
 
         var files = 0
+        var journalFiles = 0
         val exported = mutableListOf<Long>()
 
         val built = runCatching {
@@ -89,6 +90,10 @@ class SessionExporter @Inject constructor(
                         exported += session.id
                     }
                 }
+                // Журнал, метки и строки сессий — разметка к этим файлам, без неё
+                // сессии на компьютере не с чем сопоставить. Кладётся только если
+                // есть сами сессии: иначе делиться по-прежнему нечем.
+                if (files > 0) journalFiles = addJournal(zip)
             }
         }.onFailure { Log.w(TAG, "Не удалось собрать архив", it) }.isSuccess
 
@@ -107,7 +112,7 @@ class SessionExporter @Inject constructor(
             fileName = archive.name,
             sizeBytes = archive.length(),
             sessionIds = exported,
-            fileCount = files,
+            fileCount = files + journalFiles,
         )
     }
 
@@ -134,20 +139,49 @@ class SessionExporter @Inject constructor(
 
     private fun addFromMediaStore(zip: ZipOutputStream, relativeDir: String, entryDir: String): Int {
         val path = relativeDir.trim('/') + "/"
+        return addFromMediaStore(zip, "${MediaStore.MediaColumns.RELATIVE_PATH} = ?", path) { entryDir }
+    }
+
+    /**
+     * `Documents/Sesame/journal/` со всеми подкаталогами суток — в архиве под
+     * `journal/...`, в той же раскладке, что на телефоне (§5). Берётся уже
+     * опубликованное: оно отстаёт от Room максимум на один тик публикации.
+     */
+    private fun addJournal(zip: ZipOutputStream): Int {
+        val root = GzipCsvWriter.ROOT_RELATIVE_PATH + "/"
+        val path = paths.journalPublishedDir.trim('/') + "/"
+        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+        return addFromMediaStore(zip, selection, "$path%") { relativePath ->
+            relativePath.removePrefix(root).trim('/')
+        }
+    }
+
+    private fun addFromMediaStore(
+        zip: ZipOutputStream,
+        selection: String,
+        selectionArg: String,
+        entryDirOf: (relativePath: String) -> String,
+    ): Int {
         var count = 0
         runCatching {
             context.contentResolver.query(
                 collection,
-                arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME),
-                "${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
-                arrayOf(path),
+                arrayOf(
+                    MediaStore.MediaColumns._ID,
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.RELATIVE_PATH,
+                ),
+                selection,
+                arrayOf(selectionArg),
                 null,
             )?.use { cursor ->
                 val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                 val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                val pathColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
                 while (cursor.moveToNext()) {
                     val uri = ContentUris.withAppendedId(collection, cursor.getLong(idColumn))
                     val name = cursor.getString(nameColumn) ?: continue
+                    val entryDir = entryDirOf(cursor.getString(pathColumn).orEmpty())
                     val copied = runCatching {
                         context.contentResolver.openInputStream(uri)?.use { input ->
                             zip.putNextEntry(ZipEntry("$entryDir/$name"))
@@ -159,7 +193,7 @@ class SessionExporter @Inject constructor(
                     if (copied) count++
                 }
             }
-        }.onFailure { Log.w(TAG, "Не удалось перечислить $path", it) }
+        }.onFailure { Log.w(TAG, "Не удалось перечислить $selectionArg", it) }
         return count
     }
 

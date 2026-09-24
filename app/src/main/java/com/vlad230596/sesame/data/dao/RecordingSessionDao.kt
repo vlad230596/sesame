@@ -17,6 +17,10 @@ interface RecordingSessionDao {
     @Query("SELECT * FROM recording_session WHERE endedAt IS NULL ORDER BY startedAt DESC LIMIT 1")
     fun observeActive(): Flow<RecordingSession?>
 
+    /** Полный снимок для `Documents/Sesame/journal/sessions.csv.gz` (§7). */
+    @Query("SELECT * FROM recording_session ORDER BY id")
+    suspend fun all(): List<RecordingSession>
+
     @Query("SELECT * FROM recording_session WHERE id = :id")
     suspend fun byId(id: Long): RecordingSession?
 

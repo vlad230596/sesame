@@ -23,6 +23,7 @@ import com.vlad230596.sesame.events.ActivityRecognitionWatcher
 import com.vlad230596.sesame.events.GeofenceWatcher
 import com.vlad230596.sesame.events.SystemEventWatcher
 import com.vlad230596.sesame.logging.DataFileStore
+import com.vlad230596.sesame.logging.JournalPublisher
 import com.vlad230596.sesame.sensors.IntensiveRecorder
 import com.vlad230596.sesame.sensors.PassiveSensorCollector
 import com.vlad230596.sesame.session.RecordingSessionController
@@ -67,6 +68,8 @@ class CollectorService : android.app.Service() {
 
     @Inject lateinit var journal: CollectorJournal
 
+    @Inject lateinit var journalPublisher: JournalPublisher
+
     @Inject lateinit var systemEvents: SystemEventWatcher
 
     @Inject lateinit var geofences: GeofenceWatcher
@@ -101,7 +104,13 @@ class CollectorService : android.app.Service() {
 
         when (intent?.action) {
             ACTION_START_SESSION -> scope.launch { startSession() }
-            ACTION_STOP_SESSION -> scope.launch { stopSession("request") }
+            ACTION_STOP_SESSION -> {
+                // Кнопка «Стоп» и виджет причину не передают — это «request». Таймер
+                // на экране передаёт свою, иначе в `session.json` истечение
+                // предохранителя было бы неотличимо от ручной остановки (§6).
+                val reason = intent.getStringExtra(EXTRA_STOP_REASON) ?: STOP_REASON_REQUEST
+                scope.launch { stopSession(reason) }
+            }
             ACTION_EXTEND_SESSION -> scope.launch { extendSession() }
         }
         return START_STICKY
@@ -130,6 +139,7 @@ class CollectorService : android.app.Service() {
         passive.stop()
         store.shutdown()
         store.onPassiveDayRotated = null
+        store.onPublishTick = null
         collecting = false
         scope.cancel()
         super.onDestroy()
@@ -140,10 +150,20 @@ class CollectorService : android.app.Service() {
     private fun ensureCollecting() {
         if (collecting) return
         collecting = true
-        store.onPassiveDayRotated = { dir ->
-            journal.log(LogEventType.PASSIVE_DAY_ROTATED, mapOf("publishedDir" to dir))
+        store.onPassiveDayRotated = { finishedDate, dir ->
+            if (dir != null) {
+                journal.log(LogEventType.PASSIVE_DAY_ROTATED, mapOf("publishedDir" to dir))
+            }
+            scope.launch { journalPublisher.publishDay(finishedDate) }
         }
+        // Журнал, метки и сессии живут в Room — в `Documents/Sesame/journal/` они
+        // попадают только выгрузкой (§7). Обработчики вызываются из потока записи,
+        // поэтому сама выгрузка уходит в корутину: поток записи ждать не должен.
+        store.onPublishTick = { scope.launch { journalPublisher.publishRecent() } }
         store.start()
+        // Вся история при каждом старте: догоняет события, накопленные до
+        // появления выгрузки, и сутки, пропущенные, пока сервис лежал.
+        scope.launch { journalPublisher.publishAll() }
 
         // §4.4. Журнал событий пишется всегда и стоит почти ноль, поэтому он
         // поднимается вместе со сбором и не зависит от разрешений: чего не
@@ -207,7 +227,7 @@ class CollectorService : android.app.Service() {
                 val config = runCatching { settings.current() }.getOrNull() ?: continue
                 val id = config.activeSessionId ?: continue
                 val plannedEnd = plannedEndOf(config, id) ?: continue
-                if (System.currentTimeMillis() >= plannedEnd) stopSession("timer")
+                if (System.currentTimeMillis() >= plannedEnd) stopSession(STOP_REASON_TIMER)
             }
         }
     }
@@ -333,6 +353,15 @@ class CollectorService : android.app.Service() {
         const val ACTION_STOP_SESSION = "com.vlad230596.sesame.action.STOP_SESSION"
         const val ACTION_EXTEND_SESSION = "com.vlad230596.sesame.action.EXTEND_SESSION"
 
+        /** Причина остановки для `stopReason` в `session.json` (§6). */
+        const val EXTRA_STOP_REASON = "com.vlad230596.sesame.extra.STOP_REASON"
+
+        /** Остановка по команде пользователя: кнопка «Стоп», виджет. */
+        const val STOP_REASON_REQUEST = "request"
+
+        /** Истёк жёсткий предохранитель сессии (§4.3). */
+        const val STOP_REASON_TIMER = "timer"
+
         fun start(context: Context) = send(context, ACTION_START)
 
         fun stop(context: Context) {
@@ -343,7 +372,13 @@ class CollectorService : android.app.Service() {
         /** Сессия уже создана в Room и настройках — сервису остаётся начать писать. */
         fun startSession(context: Context) = send(context, ACTION_START_SESSION)
 
-        fun stopSession(context: Context) = send(context, ACTION_STOP_SESSION)
+        fun stopSession(context: Context, reason: String = STOP_REASON_REQUEST) {
+            val intent = Intent(context, CollectorService::class.java)
+                .setAction(ACTION_STOP_SESSION)
+                .putExtra(EXTRA_STOP_REASON, reason)
+            runCatching { ContextCompat.startForegroundService(context, intent) }
+                .onFailure { Log.w(TAG, "Не удалось отправить $ACTION_STOP_SESSION сервису", it) }
+        }
 
         fun extendSession(context: Context) = send(context, ACTION_EXTEND_SESSION)
 

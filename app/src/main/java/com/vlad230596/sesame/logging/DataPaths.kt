@@ -46,6 +46,12 @@ class DataPaths @Inject constructor(
     fun passiveStagingDir(date: LocalDate): File =
         File(stagingRoot, "passive/${DATE_FORMAT.format(date)}")
 
+    /** Staging журнала: файлы собираются из Room заново на каждой публикации. */
+    val journalStagingDir: File get() = File(stagingRoot, "journal")
+
+    fun journalDayStagingDir(date: LocalDate): File =
+        File(journalStagingDir, DATE_FORMAT.format(date))
+
     /** `Documents/Sesame/sessions/<session-id>/` (§5). */
     fun sessionPublishedDir(sessionId: Long): String =
         "${GzipCsvWriter.ROOT_RELATIVE_PATH}/sessions/$sessionId"
@@ -54,11 +60,22 @@ class DataPaths @Inject constructor(
     fun passivePublishedDir(date: LocalDate): String =
         "${GzipCsvWriter.ROOT_RELATIVE_PATH}/passive/${DATE_FORMAT.format(date)}"
 
+    /** `Documents/Sesame/journal/` — снимки меток и сессий (§5, §7). */
+    val journalPublishedDir: String get() = "${GzipCsvWriter.ROOT_RELATIVE_PATH}/journal"
+
+    /** `Documents/Sesame/journal/<YYYY-MM-DD>/` — события журнала за сутки (§5, §7). */
+    fun journalDayPublishedDir(date: LocalDate): String =
+        "$journalPublishedDir/${DATE_FORMAT.format(date)}"
+
     companion object {
         val DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
         fun localDate(epochMillis: Long): LocalDate =
             Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+
+        /** Начало суток [date] в местной зоне — та же зона, что у [localDate]. */
+        fun startOfDayMillis(date: LocalDate): Long =
+            date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
         /** Полночь следующих суток в местной зоне: граница суточной ротации (§5). */
         fun nextMidnightMillis(epochMillis: Long): Long {

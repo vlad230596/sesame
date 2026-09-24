@@ -127,14 +127,17 @@ class RecordingSessionController @Inject constructor(
      * открыта, значит сервис до неё не добрался (например, не смог подняться без
      * разрешения на локацию), и строку закрываем сами. Незакрытая сессия хуже
      * неточного `sizeBytes`: главный экран показывал бы идущую запись вечно.
+     *
+     * @param reason уходит в `stopReason` манифеста сессии (§6): по умолчанию
+     *        «request», остановка по таймеру передаёт [CollectorService.STOP_REASON_TIMER].
      */
-    suspend fun stop() {
+    suspend fun stop(reason: String = CollectorService.STOP_REASON_REQUEST) {
         val open = sessionDao.observeActive().first()
         if (open == null) {
             settings.setActiveSession(null, null)
             return
         }
-        CollectorService.stopSession(context)
+        CollectorService.stopSession(context, reason)
         scope.launch {
             delay(STOP_FALLBACK_MILLIS)
             val still = sessionDao.byId(open.id) ?: return@launch

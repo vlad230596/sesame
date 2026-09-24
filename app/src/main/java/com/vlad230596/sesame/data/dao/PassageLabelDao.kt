@@ -21,6 +21,10 @@ interface PassageLabelDao {
     @Query("SELECT * FROM passage_label WHERE confirmed = 0 AND discarded = 0 ORDER BY timestamp DESC")
     fun observeUnconfirmed(): Flow<List<PassageLabel>>
 
+    /** Полный снимок для `Documents/Sesame/journal/labels.csv.gz` (§7). */
+    @Query("SELECT * FROM passage_label ORDER BY id")
+    suspend fun all(): List<PassageLabel>
+
     @Query("SELECT * FROM passage_label WHERE id = :id")
     suspend fun byId(id: Long): PassageLabel?
 

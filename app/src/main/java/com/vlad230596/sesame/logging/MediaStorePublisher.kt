@@ -92,7 +92,10 @@ class MediaStorePublisher @Inject constructor(
         total
     }.onFailure { Log.w(TAG, "Не удалось посчитать занятый объём", it) }.getOrDefault(0L)
 
-    private fun findExisting(path: String, displayName: String): Uri? = runCatching {
+    private fun findExisting(path: String, displayName: String): Uri? =
+        findExact(path, displayName) ?: findRenamed(path, displayName)
+
+    private fun findExact(path: String, displayName: String): Uri? = runCatching {
         context.contentResolver.query(
             collection,
             arrayOf(MediaStore.MediaColumns._ID),
@@ -103,6 +106,37 @@ class MediaStorePublisher @Inject constructor(
         )?.use { cursor ->
             if (cursor.moveToFirst()) ContentUris.withAppendedId(collection, cursor.getLong(0))
             else null
+        }
+    }.getOrNull()
+
+    /**
+     * Файл, который `MediaStore` переименовал при вставке: `labels.csv (1).gz`.
+     *
+     * Так бывает после переустановки: файлы прошлой установки остаются в
+     * `Documents/Sesame/`, но уже не принадлежат приложению и без разрешений на
+     * хранилище ему не видны. [findExact] их не находит, вставка того же имени
+     * получает суффикс, и без этого поиска каждая следующая публикация снимка
+     * (`labels.csv.gz` раз в 15 минут) плодила бы новый `(2)`, `(3)`… Видны нам
+     * только собственные файлы, поэтому любой такой кандидат — наша прошлая
+     * публикация; берётся самая свежая.
+     */
+    private fun findRenamed(path: String, displayName: String): Uri? = runCatching {
+        val stem = displayName.substringBefore('.')
+        context.contentResolver.query(
+            collection,
+            arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME),
+            "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND " +
+                "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?",
+            arrayOf(path, "$stem%(%)%"),
+            "${MediaStore.MediaColumns._ID} DESC",
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(1) ?: continue
+                if (name.replace(RENAME_SUFFIX, "") == displayName) {
+                    return@runCatching ContentUris.withAppendedId(collection, cursor.getLong(0))
+                }
+            }
+            null
         }
     }.getOrNull()
 
@@ -120,5 +154,8 @@ class MediaStorePublisher @Inject constructor(
     private companion object {
         const val TAG = "MediaStorePublisher"
         const val COPY_BUFFER_BYTES = 64 * 1024
+
+        /** Суффикс уникальности, который `MediaStore` вставляет перед расширением. */
+        val RENAME_SUFFIX = Regex(""" \(\d+\)""")
     }
 }
