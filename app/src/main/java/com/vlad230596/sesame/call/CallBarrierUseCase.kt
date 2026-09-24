@@ -1,11 +1,13 @@
 package com.vlad230596.sesame.call
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Bundle
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
 import android.util.Log
@@ -58,14 +60,27 @@ data class CallBarrierResult(
  * Единая точка «открыть шлагбаум» для приложения и для виджета.
  *
  * Полный контракт (§4.1):
- * - `Intent(ACTION_CALL)` с разрешением `CALL_PHONE`, без экрана набора;
- * - при нескольких звонящих аккаунтах в интент кладётся
+ * - `TelecomManager.placeCall` с разрешением `CALL_PHONE`, без экрана набора;
+ * - при нескольких звонящих аккаунтах передаётся
  *   `android.telecom.extra.PHONE_ACCOUNT_HANDLE`;
  * - программное завершение звонка не делается — шлагбаум сбрасывает вызов сам;
  * - молчаливый отказ недопустим: нет разрешения / нет сети / звонок не удался —
  *   открывается `ACTION_DIAL` с введённым номером ([CallOutcome.DIALER_FALLBACK]);
  * - номер не задан — исход [CallOutcome.NO_NUMBER], UI ведёт в настройки шлагбаумов;
  * - отмена по таймеру подтверждения — [CallOutcome.CANCELLED_BY_USER].
+ *
+ * **Почему `placeCall`, а не `Intent(ACTION_CALL)`.** `ACTION_CALL` со схемой
+ * `tel` — неявный интент, и системной звонилке он не принадлежит: такой
+ * `intent-filter` вправе объявить любое приложение, и Zoom, мессенджеры и
+ * автодозвонщики этим пользуются. Как только на устройстве нашлось больше одного
+ * кандидата, система вместо звонка показывает «Открыть с помощью» — то есть
+ * ровно в момент, когда рука уже на руле, приложение просит выбрать из списка.
+ * Роль «телефон по умолчанию» на это не влияет: она про `ACTION_DIAL` и входящие.
+ * `placeCall` — прямой вызов системного Telecom, резолвинга пакетов там нет
+ * вовсе, поэтому диалог не может появиться в принципе.
+ *
+ * Побочно это чинит виджет: `placeCall` не запускает Activity, и ограничения
+ * Android 10+ на старт Activity из фона к нему не относятся.
  *
  * Каждая попытка, чем бы она ни кончилась, порождает [PassageLabel] с
  * `confirmed = false` и запись в журнале: разметка не должна зависеть от того,
@@ -92,11 +107,19 @@ class CallBarrierUseCase @Inject constructor(
             PackageManager.PERMISSION_GRANTED
 
         if (canCall) {
+            val account = request.phoneAccount ?: selectedPhoneAccount()
+
+            val placed = runCatching { placeCall(uri, account) }
+            if (placed.isSuccess) return finish(request, CallOutcome.CALLED, null)
+            Log.w(TAG, "placeCall не удался, пробуем ACTION_CALL", placed.exceptionOrNull())
+
+            // Запасной путь на случай прошивки, где Telecom отказал: диалог выбора
+            // здесь возможен, но показать его лучше, чем не позвонить.
             val attempt = runCatching {
                 context.startActivity(
                     Intent(Intent.ACTION_CALL, uri)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        .putPhoneAccount(request.phoneAccount ?: selectedPhoneAccount()),
+                        .putPhoneAccount(account),
                 )
             }
             if (attempt.isSuccess) return finish(request, CallOutcome.CALLED, null)
@@ -104,11 +127,15 @@ class CallBarrierUseCase @Inject constructor(
         }
 
         // Молчаливый отказ недопустим: открываем звонилку с уже введённым номером.
-        val dial = runCatching {
-            context.startActivity(
-                Intent(Intent.ACTION_DIAL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        }
+        // Пакет проставляется явно — у ACTION_DIAL та же беда с диалогом выбора,
+        // а перебирать звонилки посреди подъезда к шлагбауму человеку незачем.
+        val dialer = defaultDialerPackage()
+        val dial = runCatching { startDial(uri, dialer) }
+            .recoverCatching { first ->
+                if (dialer == null) throw first
+                Log.w(TAG, "Звонилка по умолчанию интент не приняла, пробуем без пакета", first)
+                startDial(uri, null)
+            }
         val error = dial.exceptionOrNull()
         if (error is ActivityNotFoundException) {
             Log.w(TAG, "На устройстве нет звонилки", error)
@@ -168,6 +195,44 @@ class CallBarrierUseCase @Inject constructor(
                 ?.firstOrNull { it.id == id }
         }.getOrNull()
     }
+
+    /**
+     * Звонок мимо резолвинга интентов — см. разбор в KDoc класса.
+     *
+     * Бросает, если Telecom недоступен (устройство без телефонии),
+     * разрешение отозвано между проверкой и вызовом или номер экстренный:
+     * все три случая ловит `runCatching` на стороне вызывающего, и мы уходим
+     * в запасной путь, а не молчим.
+     */
+    @SuppressLint("MissingPermission") // CALL_PHONE проверен в invoke() перед вызовом
+    private fun placeCall(uri: Uri, account: PhoneAccountHandle?) {
+        val telecom = context.getSystemService<TelecomManager>()
+            ?: error("TelecomManager недоступен")
+        telecom.placeCall(
+            uri,
+            Bundle().apply {
+                if (account != null) {
+                    putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, account)
+                }
+            },
+        )
+    }
+
+    private fun startDial(uri: Uri, dialerPackage: String?) {
+        context.startActivity(
+            Intent(Intent.ACTION_DIAL, uri)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .apply { if (dialerPackage != null) setPackage(dialerPackage) },
+        )
+    }
+
+    /**
+     * Звонилка по умолчанию. Видимость этого пакета даёт `<queries>` в манифесте:
+     * без неё на Android 11+ имя вернулось бы, а `startActivity` с ним упал бы.
+     */
+    private fun defaultDialerPackage(): String? = runCatching {
+        context.getSystemService<TelecomManager>()?.defaultDialerPackage
+    }.getOrNull()?.takeIf { it.isNotBlank() }
 
     private fun Intent.putPhoneAccount(handle: PhoneAccountHandle?): Intent = apply {
         if (handle != null) putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle)

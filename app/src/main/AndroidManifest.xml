@@ -61,6 +61,19 @@
         android:name="android.hardware.location.gps"
         android:required="false" />
 
+    <!--
+        §4.1. Запасной путь открывает звонилку явным пакетом, иначе система
+        снова спросит «Открыть с помощью» и покажет список приложений, готовых
+        обработать tel:. С Android 11 чужие пакеты по умолчанию не видны, и без
+        этого блока явный интент упал бы с ActivityNotFoundException.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
+    </queries>
+
     <application
         android:name=".SesameApp"
         android:allowBackup="false"
