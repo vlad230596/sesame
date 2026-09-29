@@ -1,7 +1,9 @@
 package com.vlad230596.sesame.events
 
 import android.content.Context
+import android.content.IntentFilter
 import android.net.ConnectivityManager
+import android.net.ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
@@ -39,6 +41,7 @@ class SystemEventWatcher @Inject constructor(
 ) {
 
     private val receiver = SystemEventReceiver()
+    private val externalReceiver = SystemEventReceiver()
 
     /** Сеть → последний известный SSID; `null` — подключены, но SSID не отдали. */
     private val wifiNetworks = ConcurrentHashMap<Network, String>()
@@ -53,30 +56,38 @@ class SystemEventWatcher @Inject constructor(
         if (registered) return
         registered = true
 
+        // Два приёмника, а не один: флаг экспорта задаётся на регистрацию, а
+        // Bluetooth и USER_PRESENT без экспорта не приходят вовсе — почему, см.
+        // SystemEventReceiver.externalSystemIntentFilter().
+        register(receiver, SystemEventReceiver.systemIntentFilter(), ContextCompat.RECEIVER_NOT_EXPORTED)
+        register(
+            externalReceiver,
+            SystemEventReceiver.externalSystemIntentFilter(),
+            ContextCompat.RECEIVER_EXPORTED,
+        )
+
+        startWifi()
+    }
+
+    private fun register(target: SystemEventReceiver, filter: IntentFilter, flags: Int) {
         runCatching {
-            ContextCompat.registerReceiver(
-                context,
-                receiver,
-                SystemEventReceiver.intentFilter(),
-                // Все действия системные: экспортировать приёмник незачем.
-                ContextCompat.RECEIVER_NOT_EXPORTED,
-            )
+            ContextCompat.registerReceiver(context, target, filter, flags)
         }.onFailure {
             journal.log(
                 LogEventType.COLLECTION_ERROR,
                 mapOf("reason" to "system_receiver_register_failed", "message" to it.message),
             )
         }
-
-        startWifi()
     }
 
     @Synchronized
     fun stop() {
         if (!registered) return
         registered = false
-        runCatching { context.unregisterReceiver(receiver) }
-            .onFailure { Log.w(TAG, "Приёмник уже снят", it) }
+        listOf(receiver, externalReceiver).forEach { target ->
+            runCatching { context.unregisterReceiver(target) }
+                .onFailure { Log.w(TAG, "Приёмник уже снят", it) }
+        }
         val manager = context.getSystemService<ConnectivityManager>()
         networkCallback?.let { callback ->
             runCatching { manager?.unregisterNetworkCallback(callback) }
@@ -91,7 +102,10 @@ class SystemEventWatcher @Inject constructor(
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .build()
 
-        val callback = object : ConnectivityManager.NetworkCallback() {
+        // Без FLAG_INCLUDE_LOCATION_INFO Android 12+ вычищает SSID из
+        // transportInfo даже при выданном разрешении на локацию: за неделю сбора
+        // все события Wi-Fi пришли с ssid = null (разбор 29.09).
+        val callback = object : ConnectivityManager.NetworkCallback(FLAG_INCLUDE_LOCATION_INFO) {
 
             override fun onCapabilitiesChanged(
                 network: Network,

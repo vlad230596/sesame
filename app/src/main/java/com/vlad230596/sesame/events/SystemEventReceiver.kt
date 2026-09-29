@@ -100,15 +100,31 @@ class SystemEventReceiver : BroadcastReceiver() {
 
     companion object {
 
-        /** Всё, что этот приёмник умеет принимать; фильтр собирается здесь же. */
-        fun intentFilter(): IntentFilter = IntentFilter().apply {
-            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
-            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+        /**
+         * Действия, которые рассылает сам `system_server` (uid `system`): их
+         * получает и неэкспортированный приёмник.
+         */
+        fun systemIntentFilter(): IntentFilter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
-            addAction(Intent.ACTION_USER_PRESENT)
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
+        }
+
+        /**
+         * Действия, которые рассылают **другие** системные процессы:
+         * `ACL_CONNECTED`/`ACL_DISCONNECTED` — Bluetooth-стек, `USER_PRESENT` —
+         * SystemUI. У них свой uid, и неэкспортированному приёмнику такие
+         * броадкасты не доставляются: за неделю сбора на S23 не пришло ни одного
+         * (разбор 29.09), тогда как экран и зарядка шли исправно. Поэтому эти
+         * действия регистрируются экспортированным приёмником. Подделать их
+         * стороннее приложение не может: все четыре — protected broadcasts,
+         * отправить их вправе только система.
+         */
+        fun externalSystemIntentFilter(): IntentFilter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(Intent.ACTION_USER_PRESENT)
         }
     }
 }
