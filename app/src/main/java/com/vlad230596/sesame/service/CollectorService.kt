@@ -24,6 +24,7 @@ import com.vlad230596.sesame.events.GeofenceWatcher
 import com.vlad230596.sesame.events.SystemEventWatcher
 import com.vlad230596.sesame.logging.DataFileStore
 import com.vlad230596.sesame.logging.JournalPublisher
+import com.vlad230596.sesame.prompt.PromptController
 import com.vlad230596.sesame.sensors.IntensiveRecorder
 import com.vlad230596.sesame.sensors.PassiveSensorCollector
 import com.vlad230596.sesame.session.RecordingSessionController
@@ -75,6 +76,8 @@ class CollectorService : android.app.Service() {
     @Inject lateinit var geofences: GeofenceWatcher
 
     @Inject lateinit var activityRecognition: ActivityRecognitionWatcher
+
+    @Inject lateinit var prompts: PromptController
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var guardJob: Job? = null
@@ -135,6 +138,8 @@ class CollectorService : android.app.Service() {
         // остаются: их ценность именно в срабатывании, когда нас нет.
         systemEvents.stop()
         geofences.stopWatching()
+        passive.locationListener = null
+        prompts.stop()
 
         passive.stop()
         store.shutdown()
@@ -174,6 +179,10 @@ class CollectorService : android.app.Service() {
         // регистрация повторяется на каждом старте сбора.
         geofences.start()
         activityRecognition.start()
+
+        // Подсказка у шлагбаума слушает те же пассивные фиксы, что пишутся в файл.
+        prompts.start()
+        passive.locationListener = { location -> prompts.onPassiveLocation(location) }
 
         scope.launch {
             val config = settings.current()

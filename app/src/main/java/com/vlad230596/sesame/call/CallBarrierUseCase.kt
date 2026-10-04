@@ -23,6 +23,7 @@ import com.vlad230596.sesame.data.dao.PassageLabelDao
 import com.vlad230596.sesame.data.entity.LogEvent
 import com.vlad230596.sesame.data.entity.PassageLabel
 import com.vlad230596.sesame.data.prefs.SettingsRepository
+import com.vlad230596.sesame.prompt.PromptController
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -96,6 +97,12 @@ class CallBarrierUseCase @Inject constructor(
     private val passageLabelDao: PassageLabelDao,
     private val logEventDao: LogEventDao,
     private val settings: SettingsRepository,
+    /**
+     * Звонок — вход для подсказки у шлагбаума: он закрывает уведомление и
+     * переворачивает «машина во дворе / за двором». `Lazy` — чтобы не тянуть
+     * контроллер с его локацией туда, где звонят из UI ещё до старта сервиса.
+     */
+    private val prompts: dagger.Lazy<PromptController>,
 ) {
 
     suspend operator fun invoke(request: CallBarrierRequest): CallBarrierResult {
@@ -157,12 +164,15 @@ class CallBarrierUseCase @Inject constructor(
         error: Throwable?,
     ): CallBarrierResult {
         val now = System.currentTimeMillis()
+        // §4.5: догадка по машине — до того, как звонок перевернёт её место.
+        val (direction, mode) = runCatching { prompts.get().guessForUse() }
+            .getOrDefault(Direction.UNKNOWN to TravelMode.UNKNOWN)
         val labelId = passageLabelDao.insert(
             PassageLabel(
                 timestamp = now,
                 barrierId = request.barrierId.takeIf { it > 0 },
-                direction = Direction.UNKNOWN,
-                mode = TravelMode.UNKNOWN,
+                direction = direction,
+                mode = mode,
                 source = request.source,
                 outcome = outcome,
                 // Отменённое нажатие подтверждать нечего: проезда не было.
@@ -179,6 +189,10 @@ class CallBarrierUseCase @Inject constructor(
                     """"outcome":"${outcome.name}","source":"${request.source.name}"}""",
             ),
         )
+        if (outcome == CallOutcome.CALLED) {
+            runCatching { prompts.get().onBarrierUsed(now) }
+                .onFailure { Log.w(TAG, "Подсказка у шлагбаума не узнала о звонке", it) }
+        }
         return CallBarrierResult(outcome = outcome, attemptedAt = now, error = error, labelId = labelId)
     }
 

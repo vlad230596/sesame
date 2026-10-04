@@ -24,6 +24,9 @@ object SensorStreams {
     const val STEP_COUNTER = "steps"
     const val LOCATION = "location"
 
+    /** Точная локация в зоне у дома (подсказка у шлагбаума) — отдельный поток суток. */
+    const val LOCATION_ZONE = "location_zone"
+
     /** Столбцы `location.csv.gz`; первый — общий `elapsed_realtime_nanos`. */
     val LOCATION_COLUMNS: List<String> = listOf(
         COLUMN_TIME,

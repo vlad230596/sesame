@@ -13,6 +13,7 @@ playServicesLocation = "21.3.0"
 datastore = "1.1.7"
 hiltNavigationCompose = "1.2.0"
 javaxInject = "1"
+junit = "4.13.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -44,6 +45,8 @@ androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navig
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 
 javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javaxInject" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

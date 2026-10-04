@@ -37,6 +37,12 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import javax.inject.Inject
 import kotlin.coroutines.resume
 
+/** Сопряжённое Bluetooth-устройство — кандидат в «машину» для подсказки у шлагбаума. */
+data class BluetoothDeviceOption(
+    val address: String,
+    val name: String,
+)
+
 /** Звонящий аккаунт (§4.1). Выбор появляется, только когда их больше одного. */
 data class PhoneAccountOption(
     val id: String,
@@ -47,6 +53,7 @@ data class SettingsUiState(
     val barriers: List<Barrier> = emptyList(),
     val settings: SesameSettings = SesameSettings(),
     val phoneAccounts: List<PhoneAccountOption> = emptyList(),
+    val bluetoothDevices: List<BluetoothDeviceOption> = emptyList(),
     /** Сколько разрешений отвалилось — для красной плашки в шапке экрана (§8). */
     val missingPermissions: Int = 0,
     /** Первое отвалившееся разрешение: плашка называет его по имени. */
@@ -76,6 +83,7 @@ class SettingsViewModel @Inject constructor(
 
     private data class Local(
         val phoneAccounts: List<PhoneAccountOption> = emptyList(),
+        val bluetoothDevices: List<BluetoothDeviceOption> = emptyList(),
         val missingPermissions: Int = 0,
         val missingHint: String? = null,
         val unsharedCount: Int = 0,
@@ -96,6 +104,7 @@ class SettingsViewModel @Inject constructor(
             barriers = barriers,
             settings = settings,
             phoneAccounts = l.phoneAccounts,
+            bluetoothDevices = l.bluetoothDevices,
             missingPermissions = l.missingPermissions,
             missingHint = l.missingHint,
             usedBytes = usedBytes,
@@ -129,9 +138,11 @@ class SettingsViewModel @Inject constructor(
         }.getOrElse { emptyList() }
 
         val missing = permissions.missing()
+        val bluetooth = bondedDevices()
         local.update {
             it.copy(
                 phoneAccounts = accounts,
+                bluetoothDevices = bluetooth,
                 missingPermissions = missing.size,
                 missingHint = missing.firstOrNull()?.title,
             )
@@ -139,6 +150,33 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             local.update { it.copy(unsharedCount = runCatching { archive.unsharedCount() }.getOrDefault(0)) }
         }
+    }
+
+    /**
+     * Сопряжённые устройства — из них выбирается машина. Только сопряжённые:
+     * магнитола, с которой телефон ни разу не связывался, в подсказке не
+     * участвует. Без `BLUETOOTH_CONNECT` список пуст, и экран это объясняет.
+     */
+    @android.annotation.SuppressLint("MissingPermission") // проверено выше
+    private fun bondedDevices(): List<BluetoothDeviceOption> {
+        if (!permissions.isGranted(Manifest.permission.BLUETOOTH_CONNECT)) return emptyList()
+        return runCatching {
+            context.getSystemService<android.bluetooth.BluetoothManager>()?.adapter?.bondedDevices.orEmpty()
+                .map { BluetoothDeviceOption(it.address, it.name?.takeIf { n -> n.isNotBlank() } ?: it.address) }
+                .sortedBy { it.name.lowercase() }
+        }.getOrDefault(emptyList())
+    }
+
+    fun setPromptEnabled(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setPromptEnabled(value) }
+    }
+
+    fun setCarBluetooth(device: BluetoothDeviceOption?) {
+        viewModelScope.launch { settingsRepository.setCarBluetooth(device?.address, device?.name) }
+    }
+
+    fun setCarPlace(place: String) {
+        viewModelScope.launch { settingsRepository.setCarPlace(place) }
     }
 
     fun saveBarrier(barrier: Barrier) {

@@ -33,6 +33,14 @@ class LocationStreamWriter(
     private val scope: WriteScope,
     private val store: DataFileStore,
     private val permissions: PermissionsChecker,
+    /**
+     * Имя потока. Точная локация зоны у дома пишется в свой файл, а не в
+     * `location.csv.gz`: иначе пассивный поток стал бы смесью двух режимов, и
+     * реплей не смог бы честно воспроизвести пассивный слой.
+     */
+    private val streamKey: String = SensorStreams.LOCATION,
+    /** Каждый записанный фикс — ещё и вход для подсказки у шлагбаума. */
+    private val onLocation: ((Location) -> Unit)? = null,
 ) {
 
     private val client: FusedLocationProviderClient =
@@ -58,7 +66,7 @@ class LocationStreamWriter(
         if (callback != null) return true
         if (!hasPermission) return false
 
-        store.declareStream(SensorStreams.LOCATION) { SensorStreams.LOCATION_COLUMNS }
+        store.declareStream(streamKey) { SensorStreams.LOCATION_COLUMNS }
 
         val request = LocationRequest.Builder(priority.toGmsPriority(), intervalMillis)
             .setMinUpdateIntervalMillis(intervalMillis)
@@ -104,7 +112,10 @@ class LocationStreamWriter(
         )
         // §6: в CSV идёт сырой elapsedRealtimeNanos самой фиксации, а не момент
         // её доставки — доставка у локации опаздывает заметно.
-        store.writeRow(scope, SensorStreams.LOCATION, location.elapsedRealtimeNanos, cells)
+        store.writeRow(scope, streamKey, location.elapsedRealtimeNanos, cells)
+        onLocation?.let { listener ->
+            runCatching { listener(location) }.onFailure { Log.w(TAG, "Слушатель локации упал", it) }
+        }
     }
 
     private companion object {

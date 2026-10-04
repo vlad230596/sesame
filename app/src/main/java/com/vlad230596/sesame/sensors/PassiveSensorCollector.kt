@@ -102,6 +102,10 @@ class PassiveSensorCollector @Inject constructor(
     /** Последняя известная локация — для догадок в метках (§4.5), следующий заход. */
     val lastLocation get() = locationWriter?.lastLocation
 
+    /** Подписчик на пассивные фиксы — подсказка у шлагбаума. Задаётся до [start]. */
+    @Volatile
+    var locationListener: ((android.location.Location) -> Unit)? = null
+
     fun start(config: SesameSettings) {
         if (running) return
         val manager = sensorManager
@@ -273,7 +277,13 @@ class PassiveSensorCollector @Inject constructor(
     }
 
     private fun startLocation(config: SesameSettings, sensorHandler: Handler) {
-        val writer = LocationStreamWriter(context, WriteScope.PASSIVE, store, permissions)
+        val writer = LocationStreamWriter(
+            context,
+            WriteScope.PASSIVE,
+            store,
+            permissions,
+            onLocation = { location -> locationListener?.invoke(location) },
+        )
         val intervalMillis = config.locationIntervalSeconds * 1000L
         val displacement = config.locationMinDisplacementMeters.toFloat()
         val granted = writer.hasPermission

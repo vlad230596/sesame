@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.os.SystemClock
 import com.vlad230596.sesame.data.CollectorJournal
 import com.vlad230596.sesame.data.LogEventType
+import com.vlad230596.sesame.prompt.PromptController
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -36,6 +37,7 @@ class SystemEventReceiver : BroadcastReceiver() {
     @InstallIn(SingletonComponent::class)
     interface SystemEventEntryPoint {
         fun journal(): CollectorJournal
+        fun prompts(): PromptController
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -50,11 +52,18 @@ class SystemEventReceiver : BroadcastReceiver() {
             else -> return
         }
         val elapsedNanos = SystemClock.elapsedRealtimeNanos()
-        val journal = runCatching {
-            EntryPointAccessors
-                .fromApplication(context.applicationContext, SystemEventEntryPoint::class.java)
-                .journal()
+        val entry = runCatching {
+            EntryPointAccessors.fromApplication(context.applicationContext, SystemEventEntryPoint::class.java)
         }.getOrNull() ?: return
+        val journal = entry.journal()
+
+        if (type == LogEventType.BLUETOOTH_CONNECTED || type == LogEventType.BLUETOOTH_DISCONNECTED) {
+            // Машина подключилась или отключилась — главный вход подсказки у шлагбаума.
+            entry.prompts().onBluetooth(
+                connected = type == LogEventType.BLUETOOTH_CONNECTED,
+                address = IntentCompat.bluetoothDevice(intent)?.address,
+            )
+        }
 
         val payload = buildMap<String, Any?> {
             // §6: у системного броадкаста собственной метки времени нет, поэтому

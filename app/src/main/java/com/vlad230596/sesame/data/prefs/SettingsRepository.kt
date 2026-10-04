@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -78,6 +79,24 @@ data class SesameSettings(
     val activeSessionPlannedEndAt: Long? = null,
     /** Один раз засеянные две записи шлагбаумов (§4.6). */
     val barriersSeeded: Boolean = false,
+    /** Уведомление со шлагбаумами по приближению (NEXT-notification-and-car.md). */
+    val promptEnabled: Boolean = true,
+    /**
+     * Bluetooth машины: её подключение — главный признак «я за рулём». Адрес —
+     * ключ, имя — для показа. `null` — машина не выбрана, подсказка не работает.
+     */
+    val carBluetoothAddress: String? = null,
+    val carBluetoothName: String? = null,
+    /**
+     * Где стоит машина: `INSIDE` / `OUTSIDE` / `UNKNOWN` (имя [com.vlad230596.sesame.prompt.CarPlace]).
+     * В настройках, а не в памяти: состояние обязано пережить перезапуск процесса.
+     */
+    val carPlace: String? = null,
+    /** Точка последней парковки — момент отключения Bluetooth машины. */
+    val carParkedLat: Double? = null,
+    val carParkedLon: Double? = null,
+    val carParkedAccuracyMeters: Float? = null,
+    val carParkedAt: Long? = null,
 ) {
     companion object {
         const val DEFAULT_CANCEL_TIMEOUT_SECONDS = 3
@@ -140,6 +159,14 @@ class SettingsRepository @Inject constructor(
         val ActiveSessionId = longPreferencesKey("active_session_id")
         val ActiveSessionPlannedEnd = longPreferencesKey("active_session_planned_end")
         val BarriersSeeded = booleanPreferencesKey("barriers_seeded")
+        val PromptEnabled = booleanPreferencesKey("prompt_enabled")
+        val CarBluetoothAddress = stringPreferencesKey("car_bluetooth_address")
+        val CarBluetoothName = stringPreferencesKey("car_bluetooth_name")
+        val CarPlace = stringPreferencesKey("car_place")
+        val CarParkedLat = doublePreferencesKey("car_parked_lat")
+        val CarParkedLon = doublePreferencesKey("car_parked_lon")
+        val CarParkedAccuracy = floatPreferencesKey("car_parked_accuracy")
+        val CarParkedAt = longPreferencesKey("car_parked_at")
     }
 
     val settings: Flow<SesameSettings> = context.settingsDataStore.data.map { it.toSettings() }
@@ -221,6 +248,29 @@ class SettingsRepository @Inject constructor(
 
     suspend fun markBarriersSeeded() = edit { it[Keys.BarriersSeeded] = true }
 
+    suspend fun setPromptEnabled(value: Boolean) = edit { it[Keys.PromptEnabled] = value }
+
+    /** Сменили машину — прежнее «где стоит» к новой отношения не имеет. */
+    suspend fun setCarBluetooth(address: String?, name: String?) = edit {
+        if (address.isNullOrBlank()) {
+            it.remove(Keys.CarBluetoothAddress)
+            it.remove(Keys.CarBluetoothName)
+        } else {
+            it[Keys.CarBluetoothAddress] = address
+            if (name.isNullOrBlank()) it.remove(Keys.CarBluetoothName) else it[Keys.CarBluetoothName] = name
+        }
+        it.remove(Keys.CarPlace)
+    }
+
+    suspend fun setCarPlace(place: String) = edit { it[Keys.CarPlace] = place }
+
+    suspend fun setCarParked(lat: Double, lon: Double, accuracyMeters: Float, at: Long) = edit {
+        it[Keys.CarParkedLat] = lat
+        it[Keys.CarParkedLon] = lon
+        it[Keys.CarParkedAccuracy] = accuracyMeters
+        it[Keys.CarParkedAt] = at
+    }
+
     /** Сброс только параметров сбора (§4.4) — остальные настройки не трогает. */
     suspend fun resetCollectionParams() = edit {
         it.remove(Keys.LocationInterval)
@@ -254,6 +304,14 @@ class SettingsRepository @Inject constructor(
             activeSessionId = this[Keys.ActiveSessionId],
             activeSessionPlannedEndAt = this[Keys.ActiveSessionPlannedEnd]?.takeIf { it > 0 },
             barriersSeeded = this[Keys.BarriersSeeded] ?: false,
+            promptEnabled = this[Keys.PromptEnabled] ?: defaults.promptEnabled,
+            carBluetoothAddress = this[Keys.CarBluetoothAddress],
+            carBluetoothName = this[Keys.CarBluetoothName],
+            carPlace = this[Keys.CarPlace],
+            carParkedLat = this[Keys.CarParkedLat],
+            carParkedLon = this[Keys.CarParkedLon],
+            carParkedAccuracyMeters = this[Keys.CarParkedAccuracy],
+            carParkedAt = this[Keys.CarParkedAt],
         )
     }
 }

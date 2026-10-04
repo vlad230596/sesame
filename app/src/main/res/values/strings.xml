@@ -22,4 +22,10 @@
     <string name="notification_collector_title">Сезам</string>
     <string name="notification_collector_text">Сбор данных активен</string>
     <string name="notification_collector_recording">Интенсивная запись</string>
+    <string name="prompt_channel_name">Шлагбаум рядом</string>
+    <string name="prompt_channel_description">Кнопки шлагбаумов, когда вы на машине подъезжаете к дому или выезжаете.</string>
+    <string name="prompt_title_arrive">Подъезжаете к дому</string>
+    <string name="prompt_title_depart">Выезжаете из двора</string>
+    <string name="prompt_text">Нажмите шлагбаум — звонок уйдёт сразу. Смахните, если не нужно.</string>
+    <string name="prompt_text_used">Звонок ушёл. Уведомление скоро скроется.</string>
 </resources>

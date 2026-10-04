@@ -170,6 +170,7 @@ fun LabelSource.title(): String = when (this) {
     LabelSource.WIDGET -> "виджет"
     LabelSource.APP -> "приложение"
     LabelSource.MANUAL -> "вручную"
+    LabelSource.NOTIFICATION -> "уведомление"
 }
 
 fun CallOutcome.title(): String = when (this) {

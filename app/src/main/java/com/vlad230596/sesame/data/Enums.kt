@@ -28,6 +28,9 @@ enum class LabelSource {
     WIDGET,
     APP,
     MANUAL,
+
+    /** Кнопка в уведомлении, появившемся по приближению. */
+    NOTIFICATION,
 }
 
 /**
@@ -91,4 +94,21 @@ enum class LogEventType {
 
     /** §5: посуточная ротация пассивных файлов — отметка стыка суток в журнале. */
     PASSIVE_DAY_ROTATED,
+
+    /**
+     * Уведомление со шлагбаумами появилось / скрылось / его смахнули
+     * (NEXT-notification-and-car.md). Это **выход** алгоритма: реплей сверяет
+     * по ним прогноз с реальностью и не подаёт их себе на вход.
+     */
+    PROMPT_SHOWN,
+    PROMPT_HIDDEN,
+    PROMPT_DISMISSED,
+
+    /** Точная локация у дома включена / выключена (зона подъезда). */
+    APPROACH_ZONE_ON,
+    APPROACH_ZONE_OFF,
+
+    /** Машину отключили — точка парковки; и смена «во дворе / за двором». */
+    CAR_PARKED,
+    CAR_PLACE_CHANGED,
 }

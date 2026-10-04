@@ -135,6 +135,15 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            Кнопки и смахивание уведомления со шлагбаумами. Не экспортирован:
+            PendingIntent адресован явно, чужим приложениям сюда незачем.
+        -->
+        <receiver
+            android:name=".prompt.PromptActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <receiver
             android:name=".events.ActivityTransitionReceiver"
             android:enabled="true"

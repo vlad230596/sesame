@@ -165,6 +165,9 @@ dependencies {
 
     // Location
     implementation(libs.play.services.location)
+
+    // Юнит-тесты чистой логики (подсказка у шлагбаума)
+    testImplementation(libs.junit)
 }
 
 // Fail release packaging in CI when no keystore was injected, instead of quietly

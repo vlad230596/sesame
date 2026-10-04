@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -52,6 +54,7 @@ import com.vlad230596.sesame.ui.common.StatusDot
 import com.vlad230596.sesame.ui.common.StepperRow
 import com.vlad230596.sesame.ui.common.SubScreenScaffold
 import com.vlad230596.sesame.ui.common.TabHeader
+import com.vlad230596.sesame.ui.common.ToggleRow
 import com.vlad230596.sesame.ui.common.ThinProgress
 import com.vlad230596.sesame.ui.common.Tones
 import com.vlad230596.sesame.ui.common.formatBytes
@@ -157,6 +160,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             onCancelTimeout = viewModel::setCancelTimeout,
             onRecordingMinutes = viewModel::setRecordingMinutes,
             onPhoneAccount = viewModel::setPhoneAccount,
+            onPromptEnabled = viewModel::setPromptEnabled,
+            onCarBluetooth = viewModel::setCarBluetooth,
+            onCarPlace = viewModel::setCarPlace,
             onExport = viewModel::requestShare,
             onOpenBarrier = { route = SettingsRoute.BarrierEdit(it.id) },
             onOpenHome = { route = SettingsRoute.Home },
@@ -243,6 +249,9 @@ private fun SettingsContent(
     onCancelTimeout: (Int) -> Unit,
     onRecordingMinutes: (Int) -> Unit,
     onPhoneAccount: (String?) -> Unit,
+    onPromptEnabled: (Boolean) -> Unit,
+    onCarBluetooth: (BluetoothDeviceOption?) -> Unit,
+    onCarPlace: (String) -> Unit,
     onExport: () -> Unit,
     onOpenBarrier: (Barrier) -> Unit,
     onOpenHome: () -> Unit,
@@ -376,6 +385,13 @@ private fun SettingsContent(
                     }
                 }
 
+                PromptSection(
+                    state = state,
+                    onPromptEnabled = onPromptEnabled,
+                    onCarBluetooth = onCarBluetooth,
+                    onCarPlace = onCarPlace,
+                )
+
                 GroupCaption("Геофенсы")
                 SettingsGroup {
                     NavGroupRow(
@@ -468,6 +484,117 @@ private fun SettingsContent(
  * Стоит первой строкой экрана и называет разрешение по имени: «что-то не так»
  * без имени заставляет заходить внутрь и сравнивать список глазами.
  */
+/**
+ * Подсказка у шлагбаума (NEXT-notification-and-car.md): тумблер, выбор машины и
+ * где она стоит. Место машины правится руками: приложение не видит, если
+ * шлагбаум открыли с другого телефона, и состояние может разойтись с реальностью.
+ */
+@Composable
+private fun PromptSection(
+    state: SettingsUiState,
+    onPromptEnabled: (Boolean) -> Unit,
+    onCarBluetooth: (BluetoothDeviceOption?) -> Unit,
+    onCarPlace: (String) -> Unit,
+) {
+    val settings = state.settings
+    var pickerVisible by remember { mutableStateOf(false) }
+
+    GroupCaption("Подсказка у шлагбаума")
+    ToggleRow(
+        title = "Уведомление на подъезде",
+        subtitle = "Кнопки шлагбаумов в шторке, когда вы на машине у дома",
+        checked = settings.promptEnabled,
+        onCheckedChange = onPromptEnabled,
+    )
+    SettingsGroup {
+        NavGroupRow(
+            title = "Машина",
+            value = settings.carBluetoothName ?: settings.carBluetoothAddress ?: "не выбрана",
+            onClick = { pickerVisible = true },
+        )
+        GroupDivider()
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Где стоит машина", style = SesameText.Caption, color = Palette.TextMuted)
+            SegmentedRow(
+                options = listOf("INSIDE", "OUTSIDE", "UNKNOWN"),
+                selected = settings.carPlace ?: "UNKNOWN",
+                onSelect = onCarPlace,
+                label = { place ->
+                    when (place) {
+                        "INSIDE" -> "Во дворе"
+                        "OUTSIDE" -> "За двором"
+                        else -> "Не знаю"
+                    }
+                },
+                height = 44.dp,
+                corner = 13.dp,
+            )
+            val parkedAt = settings.carParkedAt
+            if (parkedAt != null) {
+                val time = java.time.Instant.ofEpochMilli(parkedAt)
+                    .atZone(java.time.ZoneId.systemDefault())
+                    .format(java.time.format.DateTimeFormatter.ofPattern("d MMM, HH:mm"))
+                val accuracy = settings.carParkedAccuracyMeters?.takeIf { it > 0 }?.let { ", ±${it.toInt()} м" }.orEmpty()
+                Text("Последняя парковка: $time$accuracy", style = SesameText.Caption, color = Palette.TextDim)
+            }
+        }
+    }
+    if (state.barriers.none { it.lat != null && it.lon != null }) {
+        FootNote("Подсказке нужны координаты шлагбаумов — задайте их в карточках шлагбаумов.")
+    }
+
+    if (pickerVisible) {
+        AlertDialog(
+            onDismissRequest = { pickerVisible = false },
+            title = { Text("Bluetooth машины") },
+            text = {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    if (state.bluetoothDevices.isEmpty()) {
+                        Text(
+                            "Сопряжённых устройств нет или не выдано разрешение «Устройства поблизости».",
+                            style = SesameText.Caption,
+                            color = Palette.TextMuted,
+                        )
+                    }
+                    state.bluetoothDevices.forEach { device ->
+                        TextButton(
+                            onClick = {
+                                onCarBluetooth(device)
+                                pickerVisible = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                device.name,
+                                modifier = Modifier.fillMaxWidth(),
+                                fontWeight = if (device.address == settings.carBluetoothAddress) {
+                                    FontWeight.Bold
+                                } else {
+                                    FontWeight.Normal
+                                },
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { pickerVisible = false }) { Text("Закрыть") }
+            },
+            dismissButton = {
+                if (settings.carBluetoothAddress != null) {
+                    TextButton(onClick = {
+                        onCarBluetooth(null)
+                        pickerVisible = false
+                    }) { Text("Не выбирать") }
+                }
+            },
+        )
+    }
+}
+
 @Composable
 private fun PermissionAlert(hint: String?, count: Int, onClick: () -> Unit) {
     SesameSurface(
@@ -551,6 +678,9 @@ private fun SettingsPreview() {
             onCancelTimeout = {},
             onRecordingMinutes = {},
             onPhoneAccount = {},
+            onPromptEnabled = {},
+            onCarBluetooth = {},
+            onCarPlace = {},
             onExport = {},
             onOpenBarrier = {},
             onOpenHome = {},
