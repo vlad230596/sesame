@@ -49,3 +49,7 @@ output.json
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Python (analysis/)
+__pycache__/
+*.pyc
