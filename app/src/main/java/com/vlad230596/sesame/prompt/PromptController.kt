@@ -88,6 +88,7 @@ class PromptController @Inject constructor(
         own.launch {
             combine(settings.settings, barrierRepository.observeAll()) { s, b -> s to b }.collect { (s, b) ->
                 val carChanged = s.carBluetoothAddress != config.carBluetoothAddress
+                val placeChanged = s.carPlace != config.carPlace
                 config = s
                 barriers = b
                 engine.barriers = b.mapNotNull { barrier ->
@@ -95,7 +96,13 @@ class PromptController @Inject constructor(
                     val lon = barrier.lon ?: return@mapNotNull null
                     BarrierPoint(barrier.id, lat, lon)
                 }
-                engine.setCarPlace(s.carPlace?.let { runCatching { CarPlace.valueOf(it) }.getOrNull() } ?: CarPlace.UNKNOWN)
+                // Только когда место в настройках действительно сменилось (правка
+                // руками или запись движка дошла): иначе любая другая запись
+                // настроек — например, точки парковки — вернула бы движку старое
+                // место, пока новое ещё не сохранено.
+                if (placeChanged) {
+                    engine.setCarPlace(s.carPlace?.let { runCatching { CarPlace.valueOf(it) }.getOrNull() } ?: CarPlace.UNKNOWN)
+                }
                 if (!active || carChanged) reset(if (carChanged) "car_changed" else "disabled")
                 if (carChanged && s.carBluetoothAddress != null) checkCarConnectedNow(s.carBluetoothAddress)
             }
@@ -135,7 +142,7 @@ class PromptController @Inject constructor(
      */
     fun guessForUse(): Pair<Direction, TravelMode> {
         if (!active || !engine.carConnected) return Direction.UNKNOWN to TravelMode.UNKNOWN
-        val direction = when (engine.directionHint()) {
+        val direction = when (engine.directionHint(now())) {
             Trigger.DEPART -> Direction.OUT
             Trigger.ARRIVE -> Direction.IN
             null -> Direction.UNKNOWN
@@ -203,7 +210,7 @@ class PromptController @Inject constructor(
                     scope?.launch { settings.setCarPlace(action.place.name) }
                     journal.log(LogEventType.CAR_PLACE_CHANGED, mapOf("place" to action.place.name))
                 }
-                is PromptAction.CarParked -> recordParking(action.place)
+                PromptAction.CarParked -> recordParking()
                 PromptAction.RequestFix -> requestFix { location ->
                     post { onLocation(location, precise = true) }
                 }
@@ -253,22 +260,34 @@ class PromptController @Inject constructor(
         zoneWriter = null
     }
 
-    /** Точка парковки: одна точная фиксация в момент отключения машины (§4 NEXT). */
-    private fun recordParking(place: CarPlace) {
+    /**
+     * Точка парковки: одна точная фиксация в момент отключения машины (§4 NEXT).
+     * Она же — страховка «где машина»: вдали от шлагбаумов машина за двором
+     * ([PromptEngine.onParked]); `place` в журнале — место уже с её учётом.
+     */
+    private fun recordParking() {
         val at = now()
         requestFix { location ->
-            val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
-            scope?.launch { settings.setCarParked(location.latitude, location.longitude, accuracy, at) }
-            journal.log(
-                LogEventType.CAR_PARKED,
-                mapOf(
-                    "lat" to location.latitude,
-                    "lon" to location.longitude,
-                    "accuracyMeters" to accuracy,
-                    "place" to place.name,
-                    "fixDelayMillis" to (location.time - at),
-                ),
-            )
+            post {
+                val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
+                val actions = if (active) {
+                    engine.onParked(at, location.latitude, location.longitude, if (accuracy >= 0) accuracy else 1_000f)
+                } else {
+                    emptyList()
+                }
+                scope?.launch { settings.setCarParked(location.latitude, location.longitude, accuracy, at) }
+                journal.log(
+                    LogEventType.CAR_PARKED,
+                    mapOf(
+                        "lat" to location.latitude,
+                        "lon" to location.longitude,
+                        "accuracyMeters" to accuracy,
+                        "place" to engine.carPlace.name,
+                        "fixDelayMillis" to (location.time - at),
+                    ),
+                )
+                apply(actions)
+            }
         }
     }
 

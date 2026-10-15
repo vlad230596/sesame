@@ -23,6 +23,10 @@ import kotlin.math.sqrt
  * - **зона у дома** — машина подключена и до шлагбаума меньше ~2 км: включается
  *   точная локация, при выходе из зоны или отключении машины — выключается;
  * - **где машина** — каждый проезд за рулём переворачивает «во дворе / за двором».
+ *   Проезд — это все звонки за рулём в пределах [PromptParams.passageMillis]:
+ *   въезд часто идёт через два шлагбаума подряд, и второй звонок не должен
+ *   перевернуть место обратно. Машина, припаркованная вдали от шлагбаумов, —
+ *   точно за двором, чем бы ни кончилась цепочка проездов.
  *
  * Не потокобезопасен: вызывающий сериализует обращения сам.
  */
@@ -53,6 +57,10 @@ class PromptEngine(
     private var episode: Episode? = null
     private var lastUseAt: Long? = null
     private var dismissedAt: Long? = null
+
+    /** Последний звонок за рулём и направление его проезда — чтобы склеить звонки одного проезда. */
+    private var lastPassageAt: Long? = null
+    private var passageTrigger: Trigger? = null
     private var zoneSince: Long? = null
 
     /** До какого момента ждём свежий фикс, чтобы решить про выезд. */
@@ -97,7 +105,24 @@ class PromptEngine(
             episode = null
             add(PromptAction.Hide("car_disconnected", used = false))
         }
-        add(PromptAction.CarParked(carPlace))
+        add(PromptAction.CarParked)
+    }
+
+    /**
+     * Точка парковки — точная фиксация, взятая после [onCarDisconnected] в момент [t].
+     * Вдали от шлагбаумов машина за двором: это страховка от проездов, которых
+     * приложение не видело (выезд без звонка, открытие с другого телефона).
+     * Рядом со шлагбаумом точка ничего не решает — машина может стоять по обе стороны.
+     * Фикс, пришедший после нового звонка, устарел и не учитывается.
+     */
+    fun onParked(t: Long, lat: Double, lon: Double, accuracyMeters: Float): List<PromptAction> = buildList {
+        if (barriers.isEmpty()) return@buildList
+        if (lastUseAt?.let { it > t } == true) return@buildList
+        val dist = distanceToNearest(lat, lon)
+        if (dist - accuracyMeters > params.parkedAwayMeters && carPlace != CarPlace.OUTSIDE) {
+            carPlace = CarPlace.OUTSIDE
+            add(PromptAction.CarPlaceChanged(CarPlace.OUTSIDE))
+        }
     }
 
     fun onLocation(t: Long, lat: Double, lon: Double, accuracyMeters: Float, precise: Boolean): List<PromptAction> =
@@ -147,7 +172,13 @@ class PromptEngine(
             zoneSince = null
             add(PromptAction.ZoneOff("used"))
         }
-        if (carConnected) {
+        val samePassage = lastPassageAt?.let { t - it < params.passageMillis } == true
+        if (carConnected && samePassage) {
+            // Второй шлагбаум того же проезда: место уже перевёрнуто первым звонком.
+            lastPassageAt = t
+        } else if (carConnected) {
+            passageTrigger = directionHint(t)
+            lastPassageAt = t
             val next = when (carPlace) {
                 CarPlace.INSIDE -> CarPlace.OUTSIDE
                 CarPlace.OUTSIDE -> CarPlace.INSIDE
@@ -183,10 +214,12 @@ class PromptEngine(
      * Догадка о направлении для метки проезда (§4.5): спрашивается **до**
      * [onBarrierUsed]. Машина во дворе — значит, выезжаем, за двором — въезжаем;
      * место неизвестно — подсказывает текущее уведомление. Без машины — `null`:
-     * пешком направление по этим данным не угадать.
+     * пешком направление по этим данным не угадать. Второй шлагбаум того же
+     * проезда — направление первого.
      */
-    fun directionHint(): Trigger? {
+    fun directionHint(t: Long): Trigger? {
         if (!carConnected) return null
+        if (lastPassageAt?.let { t - it < params.passageMillis } == true) return passageTrigger
         return when (carPlace) {
             CarPlace.INSIDE -> Trigger.DEPART
             CarPlace.OUTSIDE -> Trigger.ARRIVE
@@ -202,6 +235,8 @@ class PromptEngine(
         departureCheckUntil = null
         lastFix = null
         lastPreciseFixAt = null
+        lastPassageAt = null
+        passageTrigger = null
     }
 
     fun onTick(t: Long): List<PromptAction> = buildList {
@@ -300,8 +335,11 @@ sealed interface PromptAction {
     data class ZoneOff(val reason: String) : PromptAction
     data class CarPlaceChanged(val place: CarPlace) : PromptAction
 
-    /** Машину отключили — момент парковки; место узнаётся одной точной фиксацией. */
-    data class CarParked(val place: CarPlace) : PromptAction
+    /**
+     * Машину отключили — момент парковки; место узнаётся одной точной фиксацией,
+     * которая возвращается в [PromptEngine.onParked].
+     */
+    data object CarParked : PromptAction
 
     /** Нужна одна свежая фиксация, чтобы принять решение. */
     data object RequestFix : PromptAction
@@ -326,4 +364,8 @@ data class PromptParams(
     val ttlMillis: Long = 120_000L,
     val afterUseMillis: Long = 120_000L,
     val cooldownMillis: Long = 10 * 60_000L,
+    /** Звонки за рулём ближе этого друг к другу — один проезд (два шлагбаума подряд — 1–3 мин). */
+    val passageMillis: Long = 10 * 60_000L,
+    /** Парковка дальше этого от шлагбаумов (за вычетом точности фикса) — машина точно за двором. */
+    val parkedAwayMeters: Double = 300.0,
 )

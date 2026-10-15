@@ -62,6 +62,9 @@ class Policy:
     cooldown_after_use_s: float = 600  # после проезда новые триггеры молчат: кружим у дома, а не едем к шлагбауму
     # Где машина: во дворе или за ним (см. State.car_place)
     track_car: bool = False
+    passage_s: float = 600             # звонки за рулём ближе этого — один проезд (два шлагбаума подряд)
+    parked_away_m: float = 300         # парковка дальше этого от шлагбаумов — машина за двором
+    parked_fix_wait_s: float = 120     # сколько ждать фикс после отключения машины
 
 
 @dataclass
@@ -91,6 +94,8 @@ class State:
         # телефона алгоритм не видит, как не увидит его и приложение.
         self.car_place = None
         self.car_parked_at = None  # (t, lat, lon, acc) — последний фикс при отключении машины
+        self.parked_pending = None  # момент отключения машины, точка парковки ещё не известна
+        self.last_passage = None   # последний звонок за рулём — склеивает звонки одного проезда
 
     def dist(self, lat, lon):
         return min(haversine(lat, lon, b[0], b[1]) for b in self.barriers)
@@ -102,13 +107,19 @@ class State:
         return (self.fix is not None and t - self.fix[0] <= p.fix_max_age_s * 1000
                 and self.fix[4] <= p.r_depart_m + self.fix[3])
 
-    def passed_barrier(self, use: Use, trigger: str | None):
+    def passed_barrier(self, use: Use, trigger: str | None, p: Policy):
         """Проезд за рулём переворачивает «во дворе / за двором».
 
+        Звонки ближе `passage_s` друг к другу — один проезд: въезд часто через два
+        шлагбаума подряд, и второй звонок не должен перевернуть место обратно.
         Если места ещё не знаем, его подсказывает триггер текущего уведомления:
         уведомление «выезд» — значит, после проезда машина снаружи, «въезд» — внутри.
         """
         if use.source != "APP" or not self.car_connected:
+            return
+        same = self.last_passage is not None and use.t - self.last_passage < p.passage_s * 1000
+        self.last_passage = use.t
+        if same:
             return
         if self.car_place is None:
             if trigger and trigger.startswith("depart"):
@@ -118,21 +129,43 @@ class State:
         else:
             self.car_place = "outside" if self.car_place == "inside" else "inside"
 
-    def update(self, e: Event):
+    def parked(self, t: int, p: Policy):
+        """Точка парковки вдали от шлагбаумов — машина за двором (страховка «где машина»).
+
+        В приложении это отдельная точная фиксация после отключения машины; в
+        реплее её нет, поэтому берётся первый фикс за `parked_fix_wait_s` после
+        отключения или, если его нет, текущий не старше `fix_max_age_s`.
+        """
+        self.parked_pending = None
+        if self.last_passage is not None and self.last_passage > t:
+            return
+        self.car_parked_at = (t,) + self.fix[1:4]
+        if self.fix[4] - self.fix[3] > p.parked_away_m:
+            self.car_place = "outside"
+
+    def update(self, e: Event, p: Policy):
         d = e.data
         if e.kind == "LOCATION":
             self.prev_dist = self.fix[4] if self.fix else None
             self.fix = (e.t, d["lat"], d["lon"], d["acc"], self.dist(d["lat"], d["lon"]))
+            if self.parked_pending is not None:
+                self.parked(self.parked_pending, p)
         elif e.kind in ("BLUETOOTH_CONNECTED", "BLUETOOTH_DISCONNECTED") and d.get("name") == self.car:
             self.car_connected = e.kind == "BLUETOOTH_CONNECTED"
-            if not self.car_connected and self.fix is not None:
-                self.car_parked_at = (e.t,) + self.fix[1:4]
+            if not self.car_connected:
+                self.parked_pending = e.t
         elif e.kind == "ACTIVITY_TRANSITION" and d.get("activity") == "IN_VEHICLE":
             self.in_vehicle = d.get("transition") == "ENTER"
         elif e.kind == "WIFI_CONNECTED" and self.home_ssid and d.get("ssid") == self.home_ssid:
             self.home_wifi, self.home_wifi_lost = True, None
         elif e.kind == "WIFI_DISCONNECTED" and self.home_wifi:
             self.home_wifi, self.home_wifi_lost = False, e.t
+        if self.parked_pending is not None and e.t - self.parked_pending > p.parked_fix_wait_s * 1000:
+            # Свежего фикса после отключения нет — решаем по последнему, если он не старый.
+            pending = self.parked_pending
+            self.parked_pending = None
+            if self.fix is not None and pending - self.fix[0] <= p.fix_max_age_s * 1000:
+                self.parked(pending, p)
 
 
 def triggers(p: Policy, s: State, e: Event, before: dict) -> str | None:
@@ -170,7 +203,7 @@ def simulate(ds: Dataset, p: Policy, start: int, end: int) -> list[Episode]:
             if cur and cur.start <= u.t <= cur.end:
                 cur.uses.append(u)
                 cur.end = u.t + int(p.after_use_s * 1000)
-            s.passed_barrier(u, cur.trigger if cur else None)
+            s.passed_barrier(u, cur.trigger if cur else None, p)
             if u.source == "APP":  # про чужое открытие приложение не знает
                 last_use = u.t
             ui += 1
@@ -178,7 +211,7 @@ def simulate(ds: Dataset, p: Policy, start: int, end: int) -> list[Episode]:
             episodes.append(cur)
             cur = None
         before = {"dist": s.fix[4] if s.fix else None}
-        s.update(e)
+        s.update(e, p)
         if e.t < start or e.t > end:
             continue
         trig = triggers(p, s, e, before)
@@ -232,6 +265,13 @@ BASELINES = [
     Policy("машина у дома (выезд)", depart_on_car_bt=True),
     Policy("машина: выезд + подъезд", depart_on_car_bt=True, arrive_with_car_bt=True),
     Policy("машина + где стоит машина", depart_on_car_bt=True, arrive_with_car_bt=True, track_car=True),
+    # Параметры приложения (PromptParams; точная локация зоны в реплее недоступна).
+    Policy("приложение 0.3.0: каждый звонок переворачивает место, без парковки",
+           depart_on_car_bt=True, arrive_with_car_bt=True, track_car=True, r_depart_m=200, r_arrive_m=800,
+           ttl_s=120, passage_s=0, parked_away_m=float("inf")),
+    Policy("приложение: один проезд — одно переключение + парковка вдали",
+           depart_on_car_bt=True, arrive_with_car_bt=True, track_car=True, r_depart_m=200, r_arrive_m=800,
+           ttl_s=120),
     Policy("AR: выезд + подъезд", depart_on_ar=True, arrive_with_ar=True),
     Policy("машина + AR + геофенс", on_geofence=True, depart_on_car_bt=True, arrive_with_car_bt=True,
            depart_on_ar=True, arrive_with_ar=True),

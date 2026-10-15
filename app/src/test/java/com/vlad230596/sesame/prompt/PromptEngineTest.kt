@@ -9,7 +9,7 @@ import org.junit.Test
 /**
  * Сценарии из реплея (docs/NEXT-notification-and-car.md): выезд, подъезд с
  * пассивной и точной локацией, «где машина», пауза после проезда, смахивание,
- * зона точной локации.
+ * зона точной локации, склейка звонков одного проезда и точка парковки.
  */
 class PromptEngineTest {
 
@@ -96,19 +96,67 @@ class PromptEngineTest {
     }
 
     @Test
-    fun `заехал и выехал — машина за двором, утром выезд без уведомления`() {
-        // Вечер: подъезд, въезд, тут же выезд через второй шлагбаум.
+    fun `два шлагбаума подряд — один проезд, место переворачивается один раз`() {
+        // Въезд через внешний и внутренний шлагбаум с разницей в полторы минуты (разбор 16.10).
         fix(3_000.0)
         engine.onCarConnected(advance(1_000))
         fix(700.0, dt = 120_000)
+        assertEquals(Trigger.ARRIVE, engine.directionHint(t))
         engine.onBarrierUsed(advance(60_000))
         assertEquals(CarPlace.INSIDE, engine.carPlace)
-        engine.onBarrierUsed(advance(80_000))
+        assertEquals(Trigger.ARRIVE, engine.directionHint(advance(80_000)))
+        engine.onBarrierUsed(t)
+        assertEquals(CarPlace.INSIDE, engine.carPlace)
+    }
+
+    @Test
+    fun `проезды через полчаса друг от друга — разные, место переворачивается дважды`() {
+        engine.setCarPlace(CarPlace.INSIDE)
+        fix(60.0)
+        engine.onCarConnected(advance(30_000))
+        engine.onBarrierUsed(advance(30_000))
         assertEquals(CarPlace.OUTSIDE, engine.carPlace)
-        engine.onCarDisconnected(advance(120_000))
-        // Утро: подключились у дома — машина за двором, шлагбаум не нужен.
-        fix(80.0, dt = 10 * 60 * 60_000L)
-        assertTrue(engine.onCarConnected(advance(30_000)).shows().isEmpty())
+        engine.onBarrierUsed(advance(30 * 60_000L))
+        assertEquals(CarPlace.INSIDE, engine.carPlace)
+    }
+
+    @Test
+    fun `выехал без звонка и встал вдали — машина за двором, подъезд показываем`() {
+        // 13.10 и 15.10: машина числилась во дворе, выезд был без звонка, вечерний подъезд молчал.
+        engine.setCarPlace(CarPlace.INSIDE)
+        fix(60.0)
+        engine.onCarConnected(advance(30_000))
+        fix(5_000.0, dt = 20 * 60_000L)
+        val parkedAt = advance(60_000)
+        assertTrue(engine.onCarDisconnected(parkedAt).any { it is PromptAction.CarParked })
+        val parked = engine.onParked(parkedAt, BASE_LAT + 2_500.0 / METERS_PER_DEG_LAT, BASE_LON, 15f)
+        assertEquals(PromptAction.CarPlaceChanged(CarPlace.OUTSIDE), parked.single())
+        // Вечер: едем домой.
+        fix(3_000.0, dt = 6 * 60 * 60_000L)
+        engine.onCarConnected(advance(1_000))
+        assertEquals(Trigger.ARRIVE, fix(700.0, dt = 120_000).shows().single().trigger)
+    }
+
+    @Test
+    fun `встал рядом со шлагбаумом — точка парковки место не меняет`() {
+        engine.setCarPlace(CarPlace.INSIDE)
+        assertTrue(engine.onParked(advance(1_000), BASE_LAT + 100.0 / METERS_PER_DEG_LAT, BASE_LON, 15f).isEmpty())
+        // Фикс по вышкам: далеко, но с точностью в километры — тоже не довод.
+        assertTrue(engine.onParked(advance(1_000), BASE_LAT + 2_000.0 / METERS_PER_DEG_LAT, BASE_LON, 1_900f).isEmpty())
+        assertEquals(CarPlace.INSIDE, engine.carPlace)
+    }
+
+    @Test
+    fun `точка парковки, пришедшая после нового звонка, устарела`() {
+        engine.setCarPlace(CarPlace.OUTSIDE)
+        fix(3_000.0)
+        val parkedAt = advance(1_000)
+        engine.onCarConnected(advance(1_000))
+        fix(700.0, dt = 60_000)
+        engine.onBarrierUsed(advance(30_000))
+        assertEquals(CarPlace.INSIDE, engine.carPlace)
+        assertTrue(engine.onParked(parkedAt, BASE_LAT + 3_000.0 / METERS_PER_DEG_LAT, BASE_LON, 15f).isEmpty())
+        assertEquals(CarPlace.INSIDE, engine.carPlace)
     }
 
     @Test
@@ -184,12 +232,12 @@ class PromptEngineTest {
 
     @Test
     fun `догадка направления для метки`() {
-        assertEquals(null, engine.directionHint())
+        assertEquals(null, engine.directionHint(t))
         fix(50.0)
         engine.onCarConnected(advance(1_000))
-        assertEquals(Trigger.DEPART, engine.directionHint())
+        assertEquals(Trigger.DEPART, engine.directionHint(t))
         engine.setCarPlace(CarPlace.OUTSIDE)
-        assertEquals(Trigger.ARRIVE, engine.directionHint())
+        assertEquals(Trigger.ARRIVE, engine.directionHint(t))
     }
 
     private companion object {
