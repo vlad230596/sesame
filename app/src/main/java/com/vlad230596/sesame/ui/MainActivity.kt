@@ -21,7 +21,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.tooling.preview.Preview
+import com.vlad230596.sesame.ui.car.CarScreen
 import com.vlad230596.sesame.ui.common.SesameBottomBar
+import com.vlad230596.sesame.ui.car.CarScreen
 import com.vlad230596.sesame.ui.common.SesameBottomBarItem
 import com.vlad230596.sesame.ui.common.SesameIcons
 import com.vlad230596.sesame.ui.history.HistoryScreen
@@ -105,10 +107,18 @@ private fun SesameApp(
 ) {
     var selected by rememberSaveable { mutableStateOf(SesameTab.HOME) }
 
+    // «Где машина» (§4.1) открывается и с главной, и из настроек, поэтому живёт
+    // здесь, поверх вкладок, а не вложенным экраном одной из них. Нижняя полоса
+    // остаётся: тап по любой вкладке закрывает карту.
+    var carVisible by rememberSaveable { mutableStateOf(false) }
+
     // Выбор метки живёт на главной: переключаем вкладку, иначе запрос с виджета
     // ушёл бы в невидимую композицию, если приложение свернули на «Истории».
     LaunchedEffect(startSessionRequest) {
-        if (startSessionRequest > 0) selected = SesameTab.HOME
+        if (startSessionRequest > 0) {
+            selected = SesameTab.HOME
+            carVisible = false
+        }
     }
 
     // Scaffold здесь больше не нужен: своя нижняя полоса и экраны, которые сами
@@ -122,14 +132,19 @@ private fun SesameApp(
             .fillMaxWidth()
             .weight(1f)
 
-        when (selected) {
-            SesameTab.HOME -> HomeScreen(
-                modifier = contentModifier,
-                startSessionRequest = startSessionRequest,
-                onStartSessionHandled = onStartSessionHandled,
-            )
-            SesameTab.HISTORY -> HistoryScreen(contentModifier)
-            SesameTab.SETTINGS -> SettingsScreen(contentModifier)
+        if (carVisible) {
+            CarScreen(onBack = { carVisible = false }, modifier = contentModifier)
+        } else {
+            when (selected) {
+                SesameTab.HOME -> HomeScreen(
+                    modifier = contentModifier,
+                    startSessionRequest = startSessionRequest,
+                    onStartSessionHandled = onStartSessionHandled,
+                    onOpenCar = { carVisible = true },
+                )
+                SesameTab.HISTORY -> HistoryScreen(contentModifier)
+                SesameTab.SETTINGS -> SettingsScreen(contentModifier, onOpenCar = { carVisible = true })
+            }
         }
 
         SesameBottomBar {
@@ -138,7 +153,10 @@ private fun SesameApp(
                     icon = tab.icon,
                     label = tab.title,
                     selected = tab == selected,
-                    onClick = { selected = tab },
+                    onClick = {
+                        selected = tab
+                        carVisible = false
+                    },
                 )
             }
         }

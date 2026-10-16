@@ -166,6 +166,9 @@ dependencies {
     // Location
     implementation(libs.play.services.location)
 
+    // Карта «Где машина» (§4.1): OSM-тайлы без API-ключа
+    implementation(libs.osmdroid.android)
+
     // Юнит-тесты чистой логики (подсказка у шлагбаума)
     testImplementation(libs.junit)
 }

@@ -41,6 +41,14 @@
     -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!--
+        NEXT-notification-and-car.md §4.1. Интернет — впервые в приложении и
+        ТОЛЬКО для тайлов карты «Где машина» (OSM через osmdroid). Больше ни для
+        чего: координаты, журнал и номера никуда не отправляются, запросы к
+        тайловому серверу несут лишь номера тайлов.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- §3. Отсутствие любого датчика не является ошибкой -->
     <uses-feature
         android:name="android.hardware.sensor.accelerometer"

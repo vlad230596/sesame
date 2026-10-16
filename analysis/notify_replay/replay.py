@@ -19,9 +19,9 @@
 
 Эпизод уведомления: появился по триггеру, висит `ttl_s` (повторный триггер
 продлевает), после использования шлагбаума держится ещё `after_use_s` — проезд
-часто включает два шлагбаума подряд — и скрывается. Ещё `cooldown_after_use_s`
-после использования новые триггеры не срабатывают: о звонке приложение знает
-само. Смахивание человеком в реплее не моделируется.
+часто включает два шлагбаума подряд — и скрывается; с `hide_on_car_off` гаснет
+и раньше, при отключении машины. Ещё `cooldown_after_use_s` после использования
+новые триггеры не срабатывают: о звонке приложение знает само. Смахивание человеком в реплее не моделируется.
 
 Запуск:
     python -m analysis.notify_replay.replay D:/Projects/sesame-data/Sesame
@@ -59,6 +59,7 @@ class Policy:
     # Жизнь уведомления
     ttl_s: float = 600
     after_use_s: float = 120
+    hide_on_car_off: bool = False      # отключили машину — уведомление гаснет (вышли из машины)
     cooldown_after_use_s: float = 600  # после проезда новые триггеры молчат: кружим у дома, а не едем к шлагбауму
     # Где машина: во дворе или за ним (см. State.car_place)
     track_car: bool = False
@@ -210,6 +211,9 @@ def simulate(ds: Dataset, p: Policy, start: int, end: int) -> list[Episode]:
         if cur and e.t > cur.end:
             episodes.append(cur)
             cur = None
+        if (p.hide_on_car_off and cur and e.kind == "BLUETOOTH_DISCONNECTED"
+                and e.data.get("name") == s.car and s.car_connected):
+            cur.end = min(cur.end, e.t)
         before = {"dist": s.fix[4] if s.fix else None}
         s.update(e, p)
         if e.t < start or e.t > end:
@@ -269,9 +273,12 @@ BASELINES = [
     Policy("приложение 0.3.0: каждый звонок переворачивает место, без парковки",
            depart_on_car_bt=True, arrive_with_car_bt=True, track_car=True, r_depart_m=200, r_arrive_m=800,
            ttl_s=120, passage_s=0, parked_away_m=float("inf")),
-    Policy("приложение: один проезд — одно переключение + парковка вдали",
+    Policy("приложение: один проезд — одно переключение + парковка вдали, после нажатия 2 мин",
            depart_on_car_bt=True, arrive_with_car_bt=True, track_car=True, r_depart_m=200, r_arrive_m=800,
            ttl_s=120),
+    Policy("приложение: + после нажатия 5 мин или до отключения машины",
+           depart_on_car_bt=True, arrive_with_car_bt=True, track_car=True, r_depart_m=200, r_arrive_m=800,
+           ttl_s=120, after_use_s=300, hide_on_car_off=True),
     Policy("AR: выезд + подъезд", depart_on_ar=True, arrive_with_ar=True),
     Policy("машина + AR + геофенс", on_geofence=True, depart_on_car_bt=True, arrive_with_car_bt=True,
            depart_on_ar=True, arrive_with_ar=True),

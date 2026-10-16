@@ -17,6 +17,7 @@ import com.vlad230596.sesame.data.CollectorJournal
 import com.vlad230596.sesame.data.Direction
 import com.vlad230596.sesame.data.TravelMode
 import com.vlad230596.sesame.data.LogEventType
+import com.vlad230596.sesame.data.ParkingRepository
 import com.vlad230596.sesame.data.entity.Barrier
 import com.vlad230596.sesame.data.prefs.LocationPriority
 import com.vlad230596.sesame.data.prefs.SesameSettings
@@ -24,6 +25,8 @@ import com.vlad230596.sesame.data.prefs.SettingsRepository
 import com.vlad230596.sesame.logging.DataFileStore
 import com.vlad230596.sesame.logging.SensorStreams
 import com.vlad230596.sesame.logging.WriteScope
+import com.vlad230596.sesame.parking.ParkingEstimator
+import com.vlad230596.sesame.parking.TailFix
 import com.vlad230596.sesame.sensors.LocationStreamWriter
 import com.vlad230596.sesame.ui.permissions.PermissionsChecker
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -45,7 +48,7 @@ import javax.inject.Singleton
  * Входы — подключение Bluetooth машины, пассивная локация, точная локация зоны
  * у дома, звонки на шлагбаум, смахивание уведомления. Выходы — уведомление
  * ([BarrierPromptNotifier]), включение и выключение точной локации и события
- * журнала. Журнал — не украшение: по `PROMPT_*` и `APPROACH_ZONE_*` следующий
+ * журнала, точка парковки ([ParkingRepository]). Журнал — не украшение: по `PROMPT_*` и `APPROACH_ZONE_*` следующий
  * офлайн-реплей сверит, что алгоритм решил на телефоне, с тем, что решил бы он.
  *
  * Все обращения к движку идут через один последовательный диспетчер: входы
@@ -65,6 +68,7 @@ class PromptController @Inject constructor(
     private val notifier: BarrierPromptNotifier,
     private val store: DataFileStore,
     private val permissions: PermissionsChecker,
+    private val parkingRepository: ParkingRepository,
 ) {
 
     private val serial = Dispatchers.Default.limitedParallelism(1)
@@ -76,6 +80,13 @@ class PromptController @Inject constructor(
     private var barriers: List<Barrier> = emptyList()
     private var shownTrigger: Trigger? = null
     private var zoneWriter: LocationStreamWriter? = null
+    private val parkingEstimator = ParkingEstimator()
+
+    /**
+     * Хвост трека для точки парковки (§4.1): фиксы зоны и пассивные за последние
+     * [TAIL_WINDOW_MILLIS], пока машина подключена. Очищается при подключении.
+     */
+    private val tail = ArrayDeque<TailFix>()
 
     private val active: Boolean
         get() = config.promptEnabled && config.carBluetoothAddress != null && engine.barriers.isNotEmpty()
@@ -123,6 +134,7 @@ class PromptController @Inject constructor(
     fun onBluetooth(connected: Boolean, address: String?, at: Long = now()) = post {
         if (!active || address == null || address != config.carBluetoothAddress) return@post
         if (connected == engine.carConnected) return@post
+        if (connected) tail.clear()
         apply(if (connected) engine.onCarConnected(at) else engine.onCarDisconnected(at))
     }
 
@@ -159,6 +171,7 @@ class PromptController @Inject constructor(
 
     private fun onLocation(location: Location, precise: Boolean) {
         if (!active) return
+        if (engine.carConnected) remember(location)
         apply(
             engine.onLocation(
                 t = now(),
@@ -168,6 +181,13 @@ class PromptController @Inject constructor(
                 precise = precise,
             ),
         )
+    }
+
+    /** В хвост — с точностью, скоростью и курсом; старше окна — выбрасываем. */
+    private fun remember(location: Location) {
+        tail.addLast(location.toTailFix())
+        val horizon = now() - TAIL_WINDOW_MILLIS
+        while (tail.isNotEmpty() && tail.first().t < horizon) tail.removeFirst()
     }
 
     private fun apply(actions: List<PromptAction>) {
@@ -261,44 +281,81 @@ class PromptController @Inject constructor(
     }
 
     /**
-     * Точка парковки: одна точная фиксация в момент отключения машины (§4 NEXT).
-     * Она же — страховка «где машина»: вдали от шлагбаумов машина за двором
-     * ([PromptEngine.onParked]); `place` в журнале — место уже с её учётом.
+     * Точка парковки (§4.1): оценка по хвосту трека, а если хвоста нет — по
+     * одной точной фиксации после отключения. Фиксацию ждём не дольше
+     * [PARKING_FIX_WAIT_MILLIS] — не пришла, оцениваем без неё.
+     *
+     * Оценка — страховка «где машина»: вдали от шлагбаумов машина за двором
+     * ([PromptEngine.onParked]); `place` в журнале — место уже с её учётом. В
+     * журнале и сырая фиксация (`lat`, `lon`, `accuracyMeters`, `fixDelayMillis`),
+     * и оценка (`est*`) — следующая выгрузка позволит их сравнить.
      */
     private fun recordParking() {
         val at = now()
-        requestFix { location ->
-            post {
-                val accuracy = if (location.hasAccuracy()) location.accuracy else -1f
-                val actions = if (active) {
-                    engine.onParked(at, location.latitude, location.longitude, if (accuracy >= 0) accuracy else 1_000f)
-                } else {
-                    emptyList()
-                }
-                scope?.launch { settings.setCarParked(location.latitude, location.longitude, accuracy, at) }
-                journal.log(
-                    LogEventType.CAR_PARKED,
-                    mapOf(
-                        "lat" to location.latitude,
-                        "lon" to location.longitude,
-                        "accuracyMeters" to accuracy,
-                        "place" to engine.carPlace.name,
-                        "fixDelayMillis" to (location.time - at),
-                    ),
-                )
-                apply(actions)
-            }
+        val fixes = tail.toList()
+        tail.clear()
+        var done = false
+        fun finish(location: Location?) {
+            if (done) return
+            done = true
+            onParkingFix(at, fixes, location)
         }
+        scope?.launch {
+            delay(PARKING_FIX_WAIT_MILLIS)
+            finish(null)
+        }
+        requestFix(onNone = { post { finish(null) } }) { location -> post { finish(location) } }
+    }
+
+    private fun onParkingFix(at: Long, fixes: List<TailFix>, location: Location?) {
+        val raw = location?.toTailFix()
+        val estimate = parkingEstimator.estimate(fixes, at, raw)
+        if (estimate == null) {
+            Log.i(TAG, "Точку парковки оценить не по чему: хвоста нет, фиксация не пришла")
+            return
+        }
+        val car = estimate.car
+        val actions = if (active) engine.onParked(at, car.lat, car.lon, car.accuracyMeters) else emptyList()
+        scope?.launch {
+            parkingRepository.saveParked(car)
+            settings.setCarParked(car.lat, car.lon, car.accuracyMeters, at)
+        }
+        journal.log(
+            LogEventType.CAR_PARKED,
+            mapOf(
+                "lat" to location?.latitude,
+                "lon" to location?.longitude,
+                "accuracyMeters" to location?.let { if (it.hasAccuracy()) it.accuracy else -1f },
+                "place" to engine.carPlace.name,
+                "fixDelayMillis" to location?.let { it.time - at },
+                "estLat" to car.lat,
+                "estLon" to car.lon,
+                "estAccuracyMeters" to car.accuracyMeters,
+                "estSource" to car.source.name,
+                "bearingDeg" to car.bearingDeg,
+                "tailFixes" to estimate.tailFixes,
+                "stopToDisconnectMillis" to estimate.stopToDisconnectMillis,
+                "rawToEstMeters" to estimate.rawToEstMeters,
+            ),
+        )
+        apply(actions)
     }
 
     @SuppressLint("MissingPermission") // проверено через permissions
-    private fun requestFix(onFix: (Location) -> Unit) {
-        if (!permissions.isGranted(Manifest.permission.ACCESS_FINE_LOCATION)) return
+    private fun requestFix(onNone: () -> Unit = {}, onFix: (Location) -> Unit) {
+        if (!permissions.isGranted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            onNone()
+            return
+        }
         runCatching {
             LocationServices.getFusedLocationProviderClient(context)
                 .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token)
-                .addOnSuccessListener { location -> if (location != null) onFix(location) }
-        }.onFailure { Log.w(TAG, "Разовая фиксация не удалась", it) }
+                .addOnSuccessListener { location -> if (location != null) onFix(location) else onNone() }
+                .addOnFailureListener { onNone() }
+        }.onFailure {
+            Log.w(TAG, "Разовая фиксация не удалась", it)
+            onNone()
+        }
     }
 
     /**
@@ -344,6 +401,7 @@ class PromptController @Inject constructor(
             journal.log(LogEventType.APPROACH_ZONE_OFF, mapOf("reason" to reason))
         }
         engine.reset()
+        tail.clear()
         shownTrigger = null
         tickJob?.cancel()
     }
@@ -353,5 +411,20 @@ class PromptController @Inject constructor(
     private companion object {
         const val TAG = "PromptController"
         const val ZONE_INTERVAL_MILLIS = 1_000L
+
+        /** Окно хвоста трека — как [com.vlad230596.sesame.parking.EstimatorParams.windowMillis]. */
+        const val TAIL_WINDOW_MILLIS = 5 * 60_000L
+
+        /** Сколько ждать разовую фиксацию после отключения машины. */
+        const val PARKING_FIX_WAIT_MILLIS = 30_000L
+
+        fun Location.toTailFix() = TailFix(
+            t = time,
+            lat = latitude,
+            lon = longitude,
+            accuracyMeters = if (hasAccuracy()) accuracy else 1_000f,
+            speedMps = if (hasSpeed()) speed else null,
+            bearingDeg = if (hasBearing()) bearing else null,
+        )
     }
 }

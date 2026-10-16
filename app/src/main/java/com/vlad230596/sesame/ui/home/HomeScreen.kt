@@ -56,6 +56,8 @@ import com.vlad230596.sesame.data.TravelMode
 import com.vlad230596.sesame.data.entity.Barrier
 import com.vlad230596.sesame.data.entity.PassageLabel
 import com.vlad230596.sesame.data.prefs.SesameSettings
+import com.vlad230596.sesame.ui.car.CarUiState
+import com.vlad230596.sesame.ui.car.CarViewModel
 import com.vlad230596.sesame.ui.common.AccentStrip
 import com.vlad230596.sesame.ui.common.CardHeadRow
 import com.vlad230596.sesame.ui.common.PassageCard
@@ -98,9 +100,14 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     startSessionRequest: Int = 0,
     onStartSessionHandled: () -> Unit = {},
+    onOpenCar: () -> Unit = {},
 ) {
     val viewModel: HomeViewModel = hiltViewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // Та же ViewModel, что у экрана карты (владелец — Activity): строка на
+    // главной и карточка на карте не разойдутся.
+    val carViewModel: CarViewModel = hiltViewModel()
+    val carState by carViewModel.state.collectAsStateWithLifecycle()
 
     LifecycleResumeEffect(Unit) {
         viewModel.refresh()
@@ -125,7 +132,17 @@ fun HomeScreen(
         onConfirmAll = viewModel::confirmAll,
         onMessageShown = viewModel::dismissMessage,
         modifier = modifier,
+        carLine = carLine(carState),
+        onOpenCar = onOpenCar,
     )
+}
+
+/** «у Ш2, 3 ч назад»; `null` — пока не загрузилось. */
+private fun carLine(car: CarUiState): String? {
+    if (!car.loaded) return null
+    val parked = car.car ?: return "парковок ещё не было"
+    val ago = if (parked.at > 0) formatAgoShort(parked.at, car.now) else null
+    return listOfNotNull(car.spotPhrase, ago).joinToString(", ").ifEmpty { "на карте" }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -148,6 +165,8 @@ private fun HomeContent(
     modifier: Modifier = Modifier,
     startSessionRequest: Int = 0,
     onStartSessionHandled: () -> Unit = {},
+    carLine: String? = null,
+    onOpenCar: () -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var labelPickerVisible by remember { mutableStateOf(false) }
@@ -213,6 +232,8 @@ private fun HomeContent(
                     onStartService = onStartService,
                     onStopService = onStopService,
                 )
+
+                if (carLine != null) CarRow(text = carLine, onClick = onOpenCar)
 
                 if (state.unconfirmedCount > 0) {
                     AccentStrip(
@@ -416,6 +437,41 @@ private fun liveColor(lastEventAt: Long?, now: Long): Color = when {
     now - lastEventAt < 6 * 60 * 60_000L -> Palette.Live
     now - lastEventAt < 24 * 60 * 60_000L -> Palette.Amber
     else -> Palette.Record
+}
+
+/**
+ * «Где машина: у Ш2, 3 ч назад» (§4.1). Одна строка, а не карта: ответ словами
+ * чаще всего достаточен, карта — по тапу.
+ */
+@Composable
+private fun CarRow(text: String, onClick: () -> Unit) {
+    SesameSurface(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
+        ) {
+            Text(
+                text = "Где машина:",
+                style = SesameText.CardTitle,
+                color = Palette.TextPrimary,
+            )
+            Text(
+                text = text,
+                style = SesameText.Caption,
+                color = Palette.TextMuted,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            Icon(
+                imageVector = SesameIcons.ChevronRight,
+                contentDescription = null,
+                tint = Palette.TextDim,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
 }
 
 /**
@@ -988,6 +1044,7 @@ private fun HomePreview() {
             onNote = { _, _ -> },
             onConfirmAll = {},
             onMessageShown = {},
+            carLine = "у Ш2, 3 ч назад",
         )
     }
 }

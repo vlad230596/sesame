@@ -96,6 +96,54 @@ class PromptEngineTest {
     }
 
     @Test
+    fun `звонок на шлагбаум зону не выключает — нужен трек до места парковки`() {
+        fix(3_000.0)
+        engine.onCarConnected(advance(1_000))
+        fix(1_900.0, dt = 120_000)
+        assertEquals(Trigger.ARRIVE, fix(140.0, precise = true).shows().single().trigger)
+        assertTrue(engine.onBarrierUsed(advance(10_000)).none { it is PromptAction.ZoneOff })
+        assertTrue(engine.zoneActive)
+        // Едем от шлагбаума к месту: зона держится, уведомление не возвращается.
+        repeat(30) { assertTrue(fix(60.0 + it, precise = true).none { a -> a is PromptAction.ZoneOff || a is PromptAction.Show }) }
+        assertTrue(engine.zoneActive)
+        assertTrue(engine.onCarDisconnected(advance(1_000)).contains(PromptAction.ZoneOff("car_disconnected")))
+        assertFalse(engine.zoneActive)
+    }
+
+    @Test
+    fun `после звонка зона гаснет по предохранителю, а пауза 10 минут не меняется`() {
+        fix(3_000.0)
+        engine.onCarConnected(advance(1_000))
+        val zoneOnAt = advance(120_000)
+        engine.onLocation(zoneOnAt, BASE_LAT + 1_900.0 / METERS_PER_DEG_LAT, BASE_LON, 10f, false)
+        fix(140.0, precise = true)
+        engine.onBarrierUsed(advance(10_000))
+        assertTrue(engine.onTick(advance(PromptParams().afterUseMillis)).any { it is PromptAction.Hide && it.used })
+        engine.setCarPlace(CarPlace.OUTSIDE)
+        // Кружим в зоне в пределах паузы — уведомления нет.
+        fix(400.0, precise = true, dt = 60_000)
+        assertTrue(fix(100.0, precise = true, dt = 60_000).shows().isEmpty())
+        assertTrue(engine.zoneActive)
+        assertEquals(zoneOnAt + PromptParams().zoneMaxMillis, engine.nextDeadline)
+        val off = engine.onTick(zoneOnAt + PromptParams().zoneMaxMillis)
+        assertTrue(off.contains(PromptAction.ZoneOff("timeout")))
+        assertFalse(engine.zoneActive)
+    }
+
+    @Test
+    fun `после звонка уведомление ждёт второй шлагбаум до 5 минут, а вышли из машины — гаснет`() {
+        fix(50.0)
+        engine.onCarConnected(advance(1_000))
+        engine.onBarrierUsed(advance(30_000))
+        // Второй шлагбаум через 170 с (12.10) — уведомление ещё висит.
+        assertTrue(engine.onTick(advance(170_000)).none { it is PromptAction.Hide })
+        assertTrue(engine.promptVisible)
+        val off = engine.onCarDisconnected(advance(30_000))
+        assertTrue(off.contains(PromptAction.Hide("car_disconnected", used = true)))
+        assertFalse(engine.promptVisible)
+    }
+
+    @Test
     fun `два шлагбаума подряд — один проезд, место переворачивается один раз`() {
         // Въезд через внешний и внутренний шлагбаум с разницей в полторы минуты (разбор 16.10).
         fix(3_000.0)
@@ -175,16 +223,16 @@ class PromptEngineTest {
     }
 
     @Test
-    fun `после проезда — уведомление живёт ещё 2 минуты и 10 минут не возвращается`() {
+    fun `после проезда — уведомление живёт ещё 5 минут и 10 минут не возвращается`() {
         fix(50.0)
         engine.onCarConnected(advance(1_000))
         engine.onBarrierUsed(advance(45_000))
-        assertTrue(engine.onTick(advance(60_000)).isEmpty())
-        assertTrue(engine.onTick(advance(61_000)).any { it is PromptAction.Hide && it.used })
+        assertTrue(engine.onTick(advance(PromptParams().afterUseMillis - 1_000)).isEmpty())
+        assertTrue(engine.onTick(advance(1_000)).any { it is PromptAction.Hide && it.used })
         // Кружим у дома: подъезд в пределах паузы не срабатывает.
         engine.setCarPlace(CarPlace.OUTSIDE)
-        fix(1_000.0, dt = 60_000)
-        assertTrue(fix(600.0, dt = 60_000).shows().isEmpty())
+        fix(1_000.0, dt = 30_000)
+        assertTrue(fix(600.0, dt = 30_000).shows().isEmpty())
     }
 
     @Test

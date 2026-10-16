@@ -14,6 +14,7 @@ datastore = "1.1.7"
 hiltNavigationCompose = "1.2.0"
 javaxInject = "1"
 junit = "4.13.2"
+osmdroid = "6.1.20"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -47,6 +48,8 @@ play-services-location = { group = "com.google.android.gms", name = "play-servic
 javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javaxInject" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+osmdroid-android = { group = "org.osmdroid", name = "osmdroid-android", version.ref = "osmdroid" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

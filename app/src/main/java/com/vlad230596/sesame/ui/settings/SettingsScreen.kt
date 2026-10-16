@@ -86,7 +86,7 @@ private sealed interface SettingsRoute {
  * переходов не окупается, а нижняя навигация при этом остаётся на месте.
  */
 @Composable
-fun SettingsScreen(modifier: Modifier = Modifier) {
+fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
     val viewModel: SettingsViewModel = hiltViewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     // Маршрут переживает поворот экрана и смерть процесса: править номер
@@ -168,6 +168,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             onOpenHome = { route = SettingsRoute.Home },
             onOpenCollection = { route = SettingsRoute.Collection },
             onOpenPermissions = { route = SettingsRoute.Permissions },
+            onOpenCar = onOpenCar,
         )
 
         SettingsRoute.Collection -> {
@@ -257,6 +258,7 @@ private fun SettingsContent(
     onOpenHome: () -> Unit,
     onOpenCollection: () -> Unit,
     onOpenPermissions: () -> Unit,
+    onOpenCar: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.fillMaxSize().background(Palette.Background)) {
@@ -390,6 +392,7 @@ private fun SettingsContent(
                     onPromptEnabled = onPromptEnabled,
                     onCarBluetooth = onCarBluetooth,
                     onCarPlace = onCarPlace,
+                    onOpenCar = onOpenCar,
                 )
 
                 GroupCaption("Геофенсы")
@@ -495,6 +498,7 @@ private fun PromptSection(
     onPromptEnabled: (Boolean) -> Unit,
     onCarBluetooth: (BluetoothDeviceOption?) -> Unit,
     onCarPlace: (String) -> Unit,
+    onOpenCar: () -> Unit,
 ) {
     val settings = state.settings
     var pickerVisible by remember { mutableStateOf(false) }
@@ -538,6 +542,13 @@ private fun PromptSection(
                 Text("Последняя парковка: $time$accuracy", style = SesameText.Caption, color = Palette.TextDim)
             }
         }
+        GroupDivider()
+        // §4.1: точная точка, метки мест и ручная правка пина — на карте.
+        NavGroupRow(
+            title = "Где машина",
+            value = "на карте",
+            onClick = onOpenCar,
+        )
     }
     if (state.barriers.none { it.lat != null && it.lon != null }) {
         FootNote("Подсказке нужны координаты шлагбаумов — задайте их в карточках шлагбаумов.")
@@ -686,6 +697,7 @@ private fun SettingsPreview() {
             onOpenHome = {},
             onOpenCollection = {},
             onOpenPermissions = {},
+            onOpenCar = {},
         )
     }
 }
