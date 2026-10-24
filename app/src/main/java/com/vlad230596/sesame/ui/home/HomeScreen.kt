@@ -16,16 +16,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,7 +41,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,9 +52,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.vlad230596.sesame.data.Direction
 import com.vlad230596.sesame.data.SessionLabel
-import com.vlad230596.sesame.data.TravelMode
 import com.vlad230596.sesame.data.entity.Barrier
 import com.vlad230596.sesame.data.entity.PassageLabel
 import com.vlad230596.sesame.data.prefs.SesameSettings
@@ -60,7 +60,6 @@ import com.vlad230596.sesame.ui.car.CarUiState
 import com.vlad230596.sesame.ui.car.CarViewModel
 import com.vlad230596.sesame.ui.common.AccentStrip
 import com.vlad230596.sesame.ui.common.CardHeadRow
-import com.vlad230596.sesame.ui.common.PassageCard
 import com.vlad230596.sesame.ui.common.SESSION_LABEL_CHOICES
 import com.vlad230596.sesame.ui.common.SesameCard
 import com.vlad230596.sesame.ui.common.SesameIcons
@@ -91,9 +90,10 @@ import com.vlad230596.sesame.ui.theme.SesameTheme
  * Поэтому сверху остаётся то, что читают («сбор идёт», «что-то не так»), а внизу
  * то, во что попадают.
  *
- * Второе решение: **«Интенсивная запись» — тонкая строка, а не заливная кнопка**.
- * Рядом с двумя огромными цветными кнопками третья такая же читалась как третий
- * шлагбаум, и промах стоил пятнадцатиминутной сессии.
+ * Второе решение: **на главной только то, чем пользуются каждый день** — две
+ * кнопки шлагбаумов и «Где машина». Интенсивная запись и разбор меток ушли с
+ * экрана: ими давно не пользуются. Запись по-прежнему запускается с виджета, а
+ * метки правятся в «Истории».
  */
 @Composable
 fun HomeScreen(
@@ -125,11 +125,6 @@ fun HomeScreen(
         onStopSession = viewModel::stopSession,
         onStartService = viewModel::startService,
         onStopService = viewModel::stopService,
-        onDirection = viewModel::setDirection,
-        onMode = viewModel::setMode,
-        onDiscarded = viewModel::setDiscarded,
-        onNote = viewModel::setNote,
-        onConfirmAll = viewModel::confirmAll,
         onMessageShown = viewModel::dismissMessage,
         modifier = modifier,
         carLine = carLine(carState),
@@ -156,11 +151,6 @@ private fun HomeContent(
     onStopSession: () -> Unit,
     onStartService: () -> Unit,
     onStopService: () -> Unit,
-    onDirection: (Long, Direction) -> Unit,
-    onMode: (Long, TravelMode) -> Unit,
-    onDiscarded: (Long, Boolean) -> Unit,
-    onNote: (Long, String) -> Unit,
-    onConfirmAll: () -> Unit,
     onMessageShown: () -> Unit,
     modifier: Modifier = Modifier,
     startSessionRequest: Int = 0,
@@ -171,7 +161,6 @@ private fun HomeContent(
     val snackbarHostState = remember { SnackbarHostState() }
     var labelPickerVisible by remember { mutableStateOf(false) }
     var permissionsVisible by remember { mutableStateOf(false) }
-    var unconfirmedVisible by remember { mutableStateOf(false) }
 
     // §4.2: кнопка записи в виджете открывает экран выбора метки сессии. Если
     // сессия уже идёт, открывать нечего — вторую запускать нельзя, и на экране
@@ -194,7 +183,8 @@ private fun HomeContent(
             HomeHeader(lastEventAt = state.lastEventAt, now = state.now)
 
             // Верхняя половина — то, что читают. Прокручивается: карточка идущей
-            // сессии и две плашки вместе в 844 dp не всегда помещаются.
+            // сессии (её запускает виджет) вместе с кнопками в 844 dp не всегда
+            // помещается.
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -233,26 +223,12 @@ private fun HomeContent(
                     onStopService = onStopService,
                 )
 
-                if (carLine != null) CarRow(text = carLine, onClick = onOpenCar)
-
-                if (state.unconfirmedCount > 0) {
-                    AccentStrip(
-                        text = "${state.unconfirmedCount} " +
-                            plural(state.unconfirmedCount.toLong(), "метка", "метки", "меток") +
-                            " без подтверждения",
-                        action = "Открыть",
-                        dotColor = Palette.Amber,
-                        accentColor = Palette.Amber,
-                        containerColor = Palette.AmberSurface,
-                        borderColor = Palette.AmberBorder,
-                        onClick = { unconfirmedVisible = true },
-                    )
-                }
-
                 Spacer(Modifier.height(Dimens.SpaceS))
             }
 
-            // Нижняя половина — то, во что попадают.
+            // Нижняя половина — то, во что попадают. «Где машина» тоже здесь, а
+            // не в прокрутке сверху: там её вытесняли кнопки, и на телефоне
+            // строки не было видно вовсе.
             Column(
                 modifier = Modifier.padding(
                     start = Dimens.ScreenPadding,
@@ -261,6 +237,8 @@ private fun HomeContent(
                 ),
                 verticalArrangement = Arrangement.spacedBy(Dimens.StackGap),
             ) {
+                CarRow(text = carLine ?: "…", onClick = onOpenCar)
+
                 if (state.barriers.isEmpty()) {
                     SesameCard {
                         Text(
@@ -281,13 +259,6 @@ private fun HomeContent(
                         immediate = state.settings.cancelTimeoutSeconds == 0,
                         compact = state.session != null,
                         onClick = { onBarrierPressed(barrier) },
-                    )
-                }
-
-                if (state.session == null) {
-                    RecordRow(
-                        minutes = state.settings.recordingDurationMinutes,
-                        onClick = { labelPickerVisible = true },
                     )
                 }
             }
@@ -353,48 +324,6 @@ private fun HomeContent(
             }
         }
     }
-
-    if (unconfirmedVisible) {
-        ModalBottomSheet(
-            onDismissRequest = { unconfirmedVisible = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Palette.Surface,
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = Dimens.ScreenPadding)
-                    .padding(bottom = Dimens.SpaceXl),
-                verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
-            ) {
-                Text("Метки без подтверждения", style = SesameText.DialogTitle.copy(fontSize = 24.sp))
-                Text(
-                    "Направление и режим заполнены догадкой. Один тап по чипу — " +
-                        "и метка подтверждена.",
-                    style = SesameText.Caption,
-                    color = Palette.TextMuted,
-                )
-                state.unconfirmed.forEach { label ->
-                    PassageCard(
-                        label = label,
-                        barrierLabel = state.barrierLabel(label.barrierId),
-                        onDirection = { onDirection(label.id, it) },
-                        onMode = { onMode(label.id, it) },
-                        onToggleDiscarded = { onDiscarded(label.id, it) },
-                        onNote = { onNote(label.id, it) },
-                    )
-                }
-                TextButton(
-                    onClick = {
-                        onConfirmAll()
-                        unconfirmedVisible = false
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Подтвердить все как есть") }
-            }
-        }
-    }
 }
 
 /**
@@ -442,18 +371,28 @@ private fun liveColor(lastEventAt: Long?, now: Long): Color = when {
 /**
  * «Где машина: у Ш2, 3 ч назад» (§4.1). Одна строка, а не карта: ответ словами
  * чаще всего достаточен, карта — по тапу.
+ *
+ * Строка высотой с прежнюю «Интенсивную запись» и с контуром, как у всего, что
+ * нажимают: это ежедневное действие, но не открытие — заливки у неё нет.
  */
 @Composable
 private fun CarRow(text: String, onClick: () -> Unit) {
-    SesameSurface(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
+    SesameSurface(
+        modifier = Modifier.fillMaxWidth().height(Dimens.RecordButtonHeight),
+        color = Palette.Surface,
+        borderColor = Palette.BorderStrong,
+        borderWidth = Dimens.BorderWidth,
+        corner = Dimens.RowCorner,
+        onClick = onClick,
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = Dimens.ScreenPadding),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.StackGap),
         ) {
             Text(
-                text = "Где машина:",
-                style = SesameText.CardTitle,
+                text = "Где машина",
+                style = SesameText.RowTitle,
                 color = Palette.TextPrimary,
             )
             Text(
@@ -468,7 +407,7 @@ private fun CarRow(text: String, onClick: () -> Unit) {
                 imageVector = SesameIcons.ChevronRight,
                 contentDescription = null,
                 tint = Palette.TextDim,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(18.dp),
             )
         }
     }
@@ -586,7 +525,11 @@ private fun BarrierButton(
                 ),
             )
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(
+                // Имя ужимается шрифтом, а не обрезается. С обычным Text и
+                // maxLines = 1 длинное «Шлагбаум Северный въезд» переносилось
+                // по пробелу, вторая строка отбрасывалась — и на кнопке
+                // оставалось одно «Шлагбаум».
+                FittedName(
                     text = barrier.displayName,
                     style = if (compact) {
                         SesameText.BarrierName.copy(fontSize = 24.sp)
@@ -594,7 +537,6 @@ private fun BarrierButton(
                         SesameText.BarrierName
                     },
                     color = accent.onContainer,
-                    maxLines = 1,
                 )
                 if (!compact) {
                     Text(
@@ -610,36 +552,23 @@ private fun BarrierButton(
 }
 
 /**
- * «Интенсивная запись» — строка, а не кнопка (макет, 64 dp).
- *
- * Цветная точка вместо заливки: смысл «сейчас можно начать запись» остаётся
- * читаемым, а вес на экране — на порядок меньше, чем у открытия шлагбаума.
+ * Имя шлагбаума в одну строку: если не влезает, шрифт уменьшается до 16 sp, и
+ * только потом — многоточие. Обрезать по слову нельзя: у имён общее начало
+ * («Шлагбаум …»), и различающая часть пропадала бы первой.
  */
 @Composable
-private fun RecordRow(minutes: Int, onClick: () -> Unit) {
-    SesameSurface(
-        modifier = Modifier.fillMaxWidth().height(Dimens.RecordButtonHeight),
-        color = Palette.Surface,
-        borderColor = Palette.BorderStrong,
-        borderWidth = Dimens.BorderWidth,
-        corner = Dimens.RowCorner,
-        onClick = onClick,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = Dimens.ScreenPadding),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Dimens.StackGap),
-        ) {
-            StatusDot(Palette.Record, Dimens.DotLarge)
-            Text(
-                text = "Интенсивная запись",
-                style = SesameText.RowTitle,
-                color = Palette.TextPrimary,
-                modifier = Modifier.weight(1f),
-            )
-            Text("$minutes мин", style = SesameText.Mono13, color = Palette.TextMuted)
-        }
-    }
+private fun FittedName(text: String, style: TextStyle, color: Color) {
+    BasicText(
+        text = text,
+        style = style.copy(color = color),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        autoSize = TextAutoSize.StepBased(
+            minFontSize = 16.sp,
+            maxFontSize = style.fontSize,
+            stepSize = 1.sp,
+        ),
+    )
 }
 
 /** Карточка идущей сессии: сколько осталось, «Продлить» и «Стоп» (§4.3). */
@@ -797,11 +726,10 @@ private fun CountdownOverlay(
                     color = Palette.AmberTextSoft,
                 )
                 Spacer(Modifier.height(6.dp))
-                Text(
+                FittedName(
                     text = barrier?.displayName ?: countdown.barrierLabel,
                     style = SesameText.DialogTitle,
                     color = accent.container,
-                    maxLines = 1,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -1038,11 +966,6 @@ private fun HomePreview() {
             onStopSession = {},
             onStartService = {},
             onStopService = {},
-            onDirection = { _, _ -> },
-            onMode = { _, _ -> },
-            onDiscarded = { _, _ -> },
-            onNote = { _, _ -> },
-            onConfirmAll = {},
             onMessageShown = {},
             carLine = "у Ш2, 3 ч назад",
         )
@@ -1075,11 +998,6 @@ private fun HomeRecordingPreview() {
             onStopSession = {},
             onStartService = {},
             onStopService = {},
-            onDirection = { _, _ -> },
-            onMode = { _, _ -> },
-            onDiscarded = { _, _ -> },
-            onNote = { _, _ -> },
-            onConfirmAll = {},
             onMessageShown = {},
         )
     }

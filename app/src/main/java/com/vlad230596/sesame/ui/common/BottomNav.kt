@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -65,10 +66,12 @@ fun RowScope.SesameBottomBarItem(
     onClick: () -> Unit,
 ) {
     val color = if (selected) Palette.Amber else Palette.TextDim
+    // fillMaxHeight обязателен: без него колонка сжимается по содержимому, Row
+    // ставит её к верху полосы, и иконки висели под чертой с пустым низом.
     Column(
         modifier = Modifier
             .weight(1f)
-            .fillMaxWidth()
+            .fillMaxHeight()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
