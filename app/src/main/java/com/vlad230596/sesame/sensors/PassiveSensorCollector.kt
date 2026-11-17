@@ -11,6 +11,7 @@ import android.util.Log
 import androidx.core.content.getSystemService
 import com.vlad230596.sesame.data.CollectorJournal
 import com.vlad230596.sesame.data.LogEventType
+import com.vlad230596.sesame.data.prefs.LocationPriority
 import com.vlad230596.sesame.data.prefs.SesameSettings
 import com.vlad230596.sesame.logging.DataFileStore
 import com.vlad230596.sesame.logging.DataPaths
@@ -32,8 +33,11 @@ import javax.inject.Singleton
  * Пассивный слой (§4.4).
  *
  * Работает постоянно под foreground service, интенсивную запись не запускает.
- * По умолчанию: локация раз в 120 с (`PRIORITY_BALANCED_POWER_ACCURACY`, смещение 25 м),
- * акселерометр 5 Гц, барометр 1 Гц при наличии, аппаратный `TYPE_STEP_COUNTER`.
+ * По умолчанию: локация раз в 120 с (`PRIORITY_BALANCED_POWER_ACCURACY`, смещение 25 м)
+ * **только в движении** — в покое `PRIORITY_PASSIVE`, см. [MotionGate];
+ * акселерометр 5 Гц (он же — детектор движения), барометр 1 Гц при наличии,
+ * аппаратный `TYPE_STEP_COUNTER`. Почему именно такие частоты — в комментариях
+ * к умолчаниям в `SesameSettings`.
  * Все частоты и параметры берутся из настроек (§4.6) — крутить их надо на
  * телефоне, без пересборки.
  *
@@ -47,10 +51,6 @@ import javax.inject.Singleton
  * пять раз в секунду, и — что важнее для §11 — FIFO продолжает наполняться,
  * пока система спит. Если FIFO у датчика нет, Android молча доставляет
  * отсчёты сразу, поведение от этого не меняется.
- *
- * Кольцевой буфер последних [DataFileStore.RING_BUFFER_SECONDS] секунд живёт в
- * [DataFileStore] — он наполняется в том же потоке записи, куда идут пассивные
- * отсчёты, поэтому его сброс в файл сессии (§4.3) не требует блокировок.
  */
 @Singleton
 class PassiveSensorCollector @Inject constructor(
@@ -58,6 +58,7 @@ class PassiveSensorCollector @Inject constructor(
     private val store: DataFileStore,
     private val permissions: PermissionsChecker,
     private val journal: CollectorJournal,
+    private val motion: MotionGate,
 ) : SensorEventListener2 {
 
     private val sensorManager: SensorManager? by lazy {
@@ -177,6 +178,7 @@ class PassiveSensorCollector @Inject constructor(
         if (!running) return
         running = false
 
+        motion.listener = null
         locationWriter?.stop()
         locationWriter = null
         store.setPassiveManifestProvider(null)
@@ -238,6 +240,9 @@ class PassiveSensorCollector @Inject constructor(
 
     override fun onSensorChanged(event: SensorEvent) {
         val key = streamKeys[event.sensor.type] ?: return
+        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER && event.values.size >= 3) {
+            motion.onAccelerometer(event.timestamp, event.values[0], event.values[1], event.values[2])
+        }
         store.writeSensor(
             scope = WriteScope.PASSIVE,
             key = key,
@@ -282,18 +287,35 @@ class PassiveSensorCollector @Inject constructor(
             WriteScope.PASSIVE,
             store,
             permissions,
-            onLocation = { location -> locationListener?.invoke(location) },
+            onLocation = { location ->
+                motion.onLocation(location.latitude, location.longitude)
+                locationListener?.invoke(location)
+            },
         )
         val intervalMillis = config.locationIntervalSeconds * 1000L
         val displacement = config.locationMinDisplacementMeters.toFloat()
         val granted = writer.hasPermission
+        val stillAtStart = motion.current == MotionGate.Mode.STILL
         val started = granted && writer.start(
-            priority = config.locationPriority,
-            intervalMillis = intervalMillis,
+            priority = if (stillAtStart) LocationPriority.PASSIVE else config.locationPriority,
+            intervalMillis = if (stillAtStart) STILL_INTERVAL_MILLIS else intervalMillis,
             minDisplacementMeters = displacement,
             looper = sensorHandler.looper,
         )
         locationWriter = if (started) writer else null
+        // Режим меняется из разных потоков; переподписка — всегда в потоке датчиков.
+        motion.listener = { mode ->
+            sensorHandler.post {
+                val active = locationWriter ?: return@post
+                val still = mode == MotionGate.Mode.STILL
+                active.reconfigure(
+                    priority = if (still) LocationPriority.PASSIVE else configSnapshot.locationPriority,
+                    intervalMillis = if (still) STILL_INTERVAL_MILLIS else configSnapshot.locationIntervalSeconds * 1000L,
+                    minDisplacementMeters = configSnapshot.locationMinDisplacementMeters.toFloat(),
+                )
+                Log.i(TAG, "Локация: режим $mode")
+            }
+        }
         locationInfo = Manifests.locationInfo(
             available = started,
             priority = config.locationPriority.name,
@@ -330,7 +352,6 @@ class PassiveSensorCollector @Inject constructor(
             put("sensors", sensorInfos)
             put("missingSensors", Manifests.strings(missingSensors))
             put("location", locationInfo)
-            put("ringBufferSeconds", DataFileStore.RING_BUFFER_SECONDS)
             put("batchLatencyMillis", BATCH_LATENCY_MILLIS)
             put(
                 "collectionParams",
@@ -352,9 +373,6 @@ class PassiveSensorCollector @Inject constructor(
         private const val TAG = "PassiveSensorCollector"
         private const val THREAD_NAME = "sesame-passive"
 
-        /** §4.3: 60 секунд предыстории. Буфер живёт в [DataFileStore]. */
-        const val RING_BUFFER_SECONDS: Int = DataFileStore.RING_BUFFER_SECONDS
-
         /**
          * Аппаратная пакетная передача: столько датчику разрешено копить в FIFO.
          * Совпадает с интервалом флаша (§5) — при падении сервиса потеря данных
@@ -364,6 +382,12 @@ class PassiveSensorCollector @Inject constructor(
 
         /** `TYPE_STEP_COUNTER` — on-change; частота лишь ограничивает поток сверху. */
         private const val STEP_COUNTER_HZ = 1
+
+        /**
+         * В покое просим `PRIORITY_PASSIVE`: свои фиксы не запрашиваются, интервал —
+         * лишь верхняя граница частоты доставки чужих.
+         */
+        private const val STILL_INTERVAL_MILLIS = 5 * 60_000L
 
         private const val FLUSH_TIMEOUT_MILLIS = 500L
         private const val FLUSH_DRAIN_MILLIS = 300L

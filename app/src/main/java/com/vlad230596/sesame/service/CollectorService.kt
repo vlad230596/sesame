@@ -17,7 +17,6 @@ import com.vlad230596.sesame.R
 import com.vlad230596.sesame.data.CollectorJournal
 import com.vlad230596.sesame.data.LogEventType
 import com.vlad230596.sesame.data.dao.RecordingSessionDao
-import com.vlad230596.sesame.data.prefs.SesameSettings
 import com.vlad230596.sesame.data.prefs.SettingsRepository
 import com.vlad230596.sesame.events.ActivityRecognitionWatcher
 import com.vlad230596.sesame.events.GeofenceWatcher
@@ -25,9 +24,7 @@ import com.vlad230596.sesame.events.SystemEventWatcher
 import com.vlad230596.sesame.logging.DataFileStore
 import com.vlad230596.sesame.logging.JournalPublisher
 import com.vlad230596.sesame.prompt.PromptController
-import com.vlad230596.sesame.sensors.IntensiveRecorder
 import com.vlad230596.sesame.sensors.PassiveSensorCollector
-import com.vlad230596.sesame.session.RecordingSessionController
 import com.vlad230596.sesame.ui.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -43,14 +40,9 @@ import javax.inject.Inject
 /**
  * Единственный foreground service приложения (§9).
  *
- * Живёт постоянно, поднимается при старте системы, ведёт пассивный слой (§4.4)
- * и по команде переходит в режим интенсивной записи (§4.3). Уведомление — канал
- * с `IMPORTANCE_MIN`, одна строка, без кнопок.
- *
- * **Жёсткий предохранитель сессии живёт здесь** (§4.3), а не в ViewModel:
- * ViewModel умирает вместе с экраном, а сессия обязана остановиться сама даже
- * если приложение свернули сразу после старта записи. Сторож сверяется со
- * стенными часами, а не считает тики, поэтому переживает и засыпание системы.
+ * Живёт постоянно, поднимается при старте системы и ведёт пассивный слой
+ * (§4.4). Интенсивной записи (§4.3) больше нет — сервис только собирает фон.
+ * Уведомление — канал с `IMPORTANCE_MIN`, одна строка, без кнопок.
  */
 @AndroidEntryPoint
 class CollectorService : android.app.Service() {
@@ -59,11 +51,7 @@ class CollectorService : android.app.Service() {
 
     @Inject lateinit var passive: PassiveSensorCollector
 
-    @Inject lateinit var recorder: IntensiveRecorder
-
     @Inject lateinit var settings: SettingsRepository
-
-    @Inject lateinit var sessions: RecordingSessionController
 
     @Inject lateinit var sessionDao: RecordingSessionDao
 
@@ -97,25 +85,12 @@ class CollectorService : android.app.Service() {
         }
         if (!startForegroundSafely()) {
             // Без разрешения на локацию FGS типа location не поднимается. Это не
-            // падение: экран состояния (§8) покажет, чего не хватает, а сессию,
-            // если она была открыта, закроет страховка в контроллере.
+            // падение: экран состояния (§8) покажет, чего не хватает.
             stopSelf()
             return START_NOT_STICKY
         }
 
         ensureCollecting()
-
-        when (intent?.action) {
-            ACTION_START_SESSION -> scope.launch { startSession() }
-            ACTION_STOP_SESSION -> {
-                // Кнопка «Стоп» и виджет причину не передают — это «request». Таймер
-                // на экране передаёт свою, иначе в `session.json` истечение
-                // предохранителя было бы неотличимо от ручной остановки (§6).
-                val reason = intent.getStringExtra(EXTRA_STOP_REASON) ?: STOP_REASON_REQUEST
-                scope.launch { stopSession(reason) }
-            }
-            ACTION_EXTEND_SESSION -> scope.launch { extendSession() }
-        }
         return START_STICKY
     }
 
@@ -123,16 +98,8 @@ class CollectorService : android.app.Service() {
         Log.i(TAG, "Сервис останавливается")
         guardJob?.cancel()
         guardJob = null
-        journal.log(LogEventType.SERVICE_STOPPED, mapOf("recording" to recorder.isRecording))
+        journal.log(LogEventType.SERVICE_STOPPED)
 
-        // Порядок важен: сначала кладём в очередь записи закрытие сессии и флаш
-        // FIFO датчиков, и только потом останавливаем поток записи — он успеет
-        // дописать и опубликовать файлы до выхода.
-        if (recorder.isRecording) {
-            recorder.stop("service_destroyed") { files ->
-                sessions.finishSessionAsync(files, "service_destroyed")
-            }
-        }
         // Динамическую регистрацию надо снять, иначе приёмник утечёт вместе с
         // контекстом сервиса. Геофенсы и Activity Recognition, наоборот,
         // остаются: их ценность именно в срабатывании, когда нас нет.
@@ -161,7 +128,7 @@ class CollectorService : android.app.Service() {
             }
             scope.launch { journalPublisher.publishDay(finishedDate) }
         }
-        // Журнал, метки и сессии живут в Room — в `Documents/Sesame/journal/` они
+        // Журнал и метки живут в Room — в `Documents/Sesame/journal/` они
         // попадают только выгрузкой (§7). Обработчики вызываются из потока записи,
         // поэтому сама выгрузка уходит в корутину: поток записи ждать не должен.
         store.onPublishTick = { scope.launch { journalPublisher.publishRecent() } }
@@ -196,33 +163,31 @@ class CollectorService : android.app.Service() {
                     "locationPriority" to config.locationPriority.name,
                 ),
             )
-            recoverSession(config)
+            closeLeftoverSession(config.activeSessionId)
         }
         startGuard()
     }
 
     /**
-     * Процесс могли убить посреди сессии (`START_STICKY` поднимет сервис заново
-     * с пустым интентом). Тогда в настройках остаётся идущая сессия: её надо либо
-     * продолжить — файлы дописываются, в манифест добавляется новый запуск со
-     * своим снимком часов (§6), — либо, если предохранитель уже истёк, закрыть
-     * по-настоящему, чтобы каталог попал в `Documents/Sesame/`.
+     * Интенсивная запись убрана, но после обновления в настройках и в Room могла
+     * остаться незакрытая сессия прежней версии. Закрываем её один раз, чтобы в
+     * `recording_session` не висела строка без `endedAt`; файлы, если были, уже
+     * лежат в `Documents/Sesame/sessions/`.
      */
-    private suspend fun recoverSession(config: SesameSettings) {
-        val id = config.activeSessionId ?: return
-        if (recorder.isRecording) return
-        val session = sessionDao.byId(id)
-        if (session == null || session.endedAt != null) {
+    private suspend fun closeLeftoverSession(id: Long?) {
+        if (id == null) return
+        runCatching {
+            sessionDao.byId(id)
+                ?.takeIf { it.endedAt == null }
+                ?.let { sessionDao.update(it.copy(endedAt = System.currentTimeMillis())) }
             settings.setActiveSession(null, null)
-            return
-        }
-        val plannedEnd = plannedEndOf(config, id) ?: return
-        recorder.start(id, session.label, plannedEnd)
-        updateNotification(recording = true)
-        if (System.currentTimeMillis() >= plannedEnd) stopSession("expired_after_restart")
+        }.onFailure { Log.w(TAG, "Не удалось закрыть оставшуюся сессию $id", it) }
     }
 
-    /** §4.3: жёсткий предохранитель на уровне сервиса. */
+    /**
+     * Сторож: дешёвая периодическая повторная регистрация геофенсов и
+     * распознавания активности.
+     */
     private fun startGuard() {
         guardJob?.cancel()
         guardJob = scope.launch {
@@ -233,56 +198,8 @@ class CollectorService : android.app.Service() {
                 // молчали бы до перезапуска сервиса.
                 geofences.retry()
                 activityRecognition.retry()
-                val config = runCatching { settings.current() }.getOrNull() ?: continue
-                val id = config.activeSessionId ?: continue
-                val plannedEnd = plannedEndOf(config, id) ?: continue
-                if (System.currentTimeMillis() >= plannedEnd) stopSession(STOP_REASON_TIMER)
             }
         }
-    }
-
-    // --- интенсивная запись --------------------------------------------------------
-
-    private suspend fun startSession() {
-        val config = settings.current()
-        val id = config.activeSessionId ?: return
-        if (recorder.isRecording) return
-        val session = sessionDao.byId(id) ?: return
-        val plannedEnd = plannedEndOf(config, id) ?: return
-        recorder.start(id, session.label, plannedEnd)
-        updateNotification(recording = true)
-    }
-
-    private suspend fun extendSession() {
-        val config = settings.current()
-        val id = config.activeSessionId ?: return
-        val plannedEnd = plannedEndOf(config, id) ?: return
-        recorder.extend(plannedEnd)
-    }
-
-    private fun stopSession(reason: String) {
-        if (!recorder.isRecording) {
-            // Строку в Room всё равно надо закрыть: сюда попадаем и когда запись
-            // не поднялась вовсе.
-            sessions.finishSessionAsync(null, reason)
-            updateNotification(recording = false)
-            return
-        }
-        recorder.stop(reason) { files -> sessions.finishSessionAsync(files, reason) }
-        updateNotification(recording = false)
-    }
-
-    /**
-     * Плановый конец сессии. Настройки — источник истины, но если процесс убили
-     * между двумя записями, значение достраивается от начала сессии: жёсткий
-     * предохранитель не имеет права потеряться (§4.3).
-     */
-    private suspend fun plannedEndOf(config: SesameSettings, id: Long): Long? {
-        config.activeSessionPlannedEndAt
-            ?.takeIf { config.activeSessionId == id }
-            ?.let { return it }
-        val startedAt = sessionDao.byId(id)?.startedAt ?: return null
-        return startedAt + config.recordingDurationMinutes * 60_000L
     }
 
     // --- уведомление ---------------------------------------------------------------
@@ -291,7 +208,7 @@ class CollectorService : android.app.Service() {
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
-            buildNotification(recording = recorder.isRecording),
+            buildNotification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
         )
         true
@@ -303,25 +220,15 @@ class CollectorService : android.app.Service() {
         false
     }
 
-    private fun updateNotification(recording: Boolean) {
-        runCatching {
-            getSystemService<NotificationManager>()
-                ?.notify(NOTIFICATION_ID, buildNotification(recording))
-        }
-    }
-
-    /** §9: одна строка, без кнопок. Текст меняется только на старте и стопе сессии. */
-    private fun buildNotification(recording: Boolean): Notification {
+    /** §9: одна строка, без кнопок. */
+    private fun buildNotification(): Notification {
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val text = getString(
-            if (recording) R.string.notification_collector_recording
-            else R.string.notification_collector_text,
-        )
+        val text = getString(R.string.notification_collector_text)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_sesame)
             .setContentTitle(getString(R.string.notification_collector_title))
@@ -350,7 +257,7 @@ class CollectorService : android.app.Service() {
     companion object {
         private const val TAG = "CollectorService"
 
-        /** Сторож сверяется со стенными часами, поэтому интервал можно держать редким. */
+        /** Повторная регистрация дешёвая, но чаще раза в 10 с она не нужна. */
         private const val GUARD_INTERVAL_MILLIS = 10_000L
 
         const val CHANNEL_ID = "sesame_collector"
@@ -358,18 +265,6 @@ class CollectorService : android.app.Service() {
 
         const val ACTION_START = "com.vlad230596.sesame.action.START_COLLECTOR"
         const val ACTION_STOP = "com.vlad230596.sesame.action.STOP_COLLECTOR"
-        const val ACTION_START_SESSION = "com.vlad230596.sesame.action.START_SESSION"
-        const val ACTION_STOP_SESSION = "com.vlad230596.sesame.action.STOP_SESSION"
-        const val ACTION_EXTEND_SESSION = "com.vlad230596.sesame.action.EXTEND_SESSION"
-
-        /** Причина остановки для `stopReason` в `session.json` (§6). */
-        const val EXTRA_STOP_REASON = "com.vlad230596.sesame.extra.STOP_REASON"
-
-        /** Остановка по команде пользователя: кнопка «Стоп», виджет. */
-        const val STOP_REASON_REQUEST = "request"
-
-        /** Истёк жёсткий предохранитель сессии (§4.3). */
-        const val STOP_REASON_TIMER = "timer"
 
         fun start(context: Context) = send(context, ACTION_START)
 
@@ -377,19 +272,6 @@ class CollectorService : android.app.Service() {
             val intent = Intent(context, CollectorService::class.java).setAction(ACTION_STOP)
             runCatching { context.startService(intent) }
         }
-
-        /** Сессия уже создана в Room и настройках — сервису остаётся начать писать. */
-        fun startSession(context: Context) = send(context, ACTION_START_SESSION)
-
-        fun stopSession(context: Context, reason: String = STOP_REASON_REQUEST) {
-            val intent = Intent(context, CollectorService::class.java)
-                .setAction(ACTION_STOP_SESSION)
-                .putExtra(EXTRA_STOP_REASON, reason)
-            runCatching { ContextCompat.startForegroundService(context, intent) }
-                .onFailure { Log.w(TAG, "Не удалось отправить $ACTION_STOP_SESSION сервису", it) }
-        }
-
-        fun extendSession(context: Context) = send(context, ACTION_EXTEND_SESSION)
 
         private fun send(context: Context, action: String) {
             val intent = Intent(context, CollectorService::class.java).setAction(action)

@@ -1,13 +1,11 @@
 package com.vlad230596.sesame.ui.history
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,7 +41,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -54,13 +51,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vlad230596.sesame.data.CallOutcome
 import com.vlad230596.sesame.data.Direction
 import com.vlad230596.sesame.data.LabelSource
-import com.vlad230596.sesame.data.SessionLabel
 import com.vlad230596.sesame.data.TravelMode
 import com.vlad230596.sesame.data.entity.Barrier
 import com.vlad230596.sesame.data.entity.PassageLabel
-import com.vlad230596.sesame.data.entity.RecordingSession
-import com.vlad230596.sesame.ui.common.FilterPill
-import com.vlad230596.sesame.ui.common.FootNote
 import com.vlad230596.sesame.ui.common.GroupCaption
 import com.vlad230596.sesame.ui.common.LabelEditor
 import com.vlad230596.sesame.ui.common.SegmentedRow
@@ -69,12 +62,10 @@ import com.vlad230596.sesame.ui.common.SesameField
 import com.vlad230596.sesame.ui.common.SesameIcons
 import com.vlad230596.sesame.ui.common.SesameSurface
 import com.vlad230596.sesame.ui.common.SquareIconButton
-import com.vlad230596.sesame.ui.common.TabHeader
+import com.vlad230596.sesame.ui.common.SubScreenScaffold
 import com.vlad230596.sesame.ui.common.Tones
-import com.vlad230596.sesame.ui.common.formatBytes
 import com.vlad230596.sesame.ui.common.formatDateTime
 import com.vlad230596.sesame.ui.common.formatDayHeader
-import com.vlad230596.sesame.ui.common.formatDuration
 import com.vlad230596.sesame.ui.common.formatTime
 import com.vlad230596.sesame.ui.common.localDateOf
 import com.vlad230596.sesame.ui.common.title
@@ -88,7 +79,9 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 
 /**
- * Вкладка «История» (§4.5), по утверждённому макету.
+ * Журнал проездов (§4.5). Отдельной вкладки у него больше нет: разметка
+ * необязательна, поэтому журнал открывается из настроек, а не висит в нижней
+ * навигации рядом с ежедневными действиями.
  *
  * Лента — это список **строк**, а не карточек-редакторов: за неделю сбора здесь
  * копятся сотни событий, и экран, на котором помещается три карточки, перестаёт
@@ -100,34 +93,18 @@ import java.time.ZoneOffset
  * полоске видно, в какую именно кнопку человек попадал, не читая подпись.
  */
 @Composable
-fun HistoryScreen(modifier: Modifier = Modifier) {
+fun HistoryScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val viewModel: HistoryViewModel = hiltViewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-
-    // Share sheet поднимается из композиции: ViewModel не должна знать про Activity.
-    LaunchedEffect(state.shareRequest) {
-        val request = state.shareRequest ?: return@LaunchedEffect
-        val started = runCatching {
-            context.startActivity(
-                android.content.Intent.createChooser(
-                    request.intent,
-                    request.description.ifBlank { "Выгрузить сессии" },
-                ),
-            )
-        }.isSuccess
-        if (started) viewModel.onShareLaunched(request.sessionIds) else viewModel.onShareFailed()
-    }
 
     HistoryContent(
         state = state,
-        onFilter = viewModel::setFilter,
+        onBack = onBack,
         onDirection = viewModel::setDirection,
         onMode = viewModel::setMode,
         onDiscarded = viewModel::setDiscarded,
         onNote = viewModel::setNote,
         onConfirm = viewModel::confirm,
-        onShare = viewModel::requestShare,
         onAddManual = viewModel::addManual,
         onMessageShown = viewModel::dismissMessage,
         modifier = modifier,
@@ -138,13 +115,12 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
 @Composable
 private fun HistoryContent(
     state: HistoryUiState,
-    onFilter: (HistoryFilter) -> Unit,
+    onBack: () -> Unit,
     onDirection: (Long, Direction) -> Unit,
     onMode: (Long, TravelMode) -> Unit,
     onDiscarded: (Long, Boolean) -> Unit,
     onNote: (Long, String) -> Unit,
     onConfirm: (Long) -> Unit,
-    onShare: () -> Unit,
     onAddManual: (Long, Long?, Direction, TravelMode, String?) -> Unit,
     onMessageShown: () -> Unit,
     modifier: Modifier = Modifier,
@@ -152,7 +128,6 @@ private fun HistoryContent(
     val snackbarHostState = remember { SnackbarHostState() }
     var manualVisible by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Long?>(null) }
-    var sessionDetails by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
@@ -161,54 +136,18 @@ private fun HistoryContent(
     }
 
     Box(modifier = modifier.fillMaxSize().background(Palette.Background)) {
-        Column(Modifier.fillMaxSize()) {
-            TabHeader("История") {
-                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
-                    SquareIconButton(
-                        icon = SesameIcons.Export,
-                        contentDescription = if (state.preparing) {
-                            "Собираю архив"
-                        } else {
-                            "Выгрузить непошаренное: ${state.unsharedCount}"
-                        },
-                        enabled = !state.preparing,
-                        onClick = onShare,
-                        tint = if (state.unsharedCount > 0) Palette.Amber else Palette.TextPrimary,
-                    )
-                    SquareIconButton(
-                        icon = SesameIcons.Plus,
-                        contentDescription = "Добавить метку задним числом",
-                        onClick = { manualVisible = true },
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = Dimens.ScreenPadding)
-                    .padding(bottom = Dimens.StackGap),
-                horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
-            ) {
-                FilterPill(
-                    text = "Всё",
-                    selected = state.filter == HistoryFilter.ALL,
-                    onClick = { onFilter(HistoryFilter.ALL) },
+        SubScreenScaffold(
+            title = "Журнал проездов",
+            onBack = onBack,
+            actions = {
+                SquareIconButton(
+                    icon = SesameIcons.Plus,
+                    contentDescription = "Добавить проезд задним числом",
+                    onClick = { manualVisible = true },
                 )
-                FilterPill(
-                    text = "Без подтверждения · ${state.unconfirmedCount}",
-                    selected = state.filter == HistoryFilter.UNCONFIRMED,
-                    onClick = { onFilter(HistoryFilter.UNCONFIRMED) },
-                )
-                FilterPill(
-                    text = "Сессии",
-                    selected = state.filter == HistoryFilter.SESSIONS,
-                    onClick = { onFilter(HistoryFilter.SESSIONS) },
-                )
-            }
-
-            val items = state.visibleItems
+            },
+        ) { _ ->
+            val items = state.items
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
@@ -226,15 +165,8 @@ private fun HistoryContent(
                             borderColor = Palette.BorderStrong,
                         ) {
                             Text(
-                                text = when (state.filter) {
-                                    HistoryFilter.ALL -> "Пока ничего нет. Метки появятся после " +
-                                        "нажатия кнопки шлагбаума или запуска интенсивной записи."
-
-                                    HistoryFilter.UNCONFIRMED -> "Всё разобрано: меток без " +
-                                        "подтверждения нет."
-
-                                    HistoryFilter.SESSIONS -> "Сессий записи ещё не было."
-                                },
+                                text = "Пока ничего нет. Проезды появятся после нажатия " +
+                                    "кнопки шлагбаума.",
                                 style = SesameText.Caption,
                                 color = Palette.TextMuted,
                                 modifier = Modifier.padding(16.dp),
@@ -253,17 +185,10 @@ private fun HistoryContent(
                         }
                     }
                     item(key = entry.key) {
-                        when (entry) {
-                            is HistoryItem.Passage -> PassageRow(
-                                entry = entry,
-                                onClick = { editing = entry.label.id },
-                            )
-
-                            is HistoryItem.Session -> SessionRow(
-                                session = entry.session,
-                                onClick = { sessionDetails = entry.session.id },
-                            )
-                        }
+                        PassageRow(
+                            entry = entry,
+                            onClick = { editing = entry.label.id },
+                        )
                     }
                 }
             }
@@ -279,7 +204,7 @@ private fun HistoryContent(
     // видна сверху — так понятно, что правится одна строка, а не открыт новый
     // экран, с которого надо возвращаться.
     val edited = editing?.let { id ->
-        state.items.filterIsInstance<HistoryItem.Passage>().firstOrNull { it.label.id == id }
+        state.items.firstOrNull { it.label.id == id }
     }
     if (edited != null) {
         val accent = SesameAccentColors.current.barrier(edited.barrierIndex).container
@@ -321,24 +246,6 @@ private fun HistoryContent(
         }
     }
 
-    val session = sessionDetails?.let { id ->
-        state.items.filterIsInstance<HistoryItem.Session>().firstOrNull { it.session.id == id }
-    }
-    if (session != null) {
-        ModalBottomSheet(
-            onDismissRequest = { sessionDetails = null },
-            containerColor = Palette.Surface,
-        ) {
-            SessionDetails(
-                session = session.session,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Dimens.ScreenPadding)
-                    .padding(bottom = Dimens.SpaceXl),
-            )
-        }
-    }
-
     if (manualVisible) {
         ManualPassageSheet(
             barriers = state.barriers,
@@ -359,7 +266,7 @@ private fun HistoryContent(
  * но глаз по ним не цепляется.
  */
 @Composable
-private fun PassageRow(entry: HistoryItem.Passage, onClick: () -> Unit) {
+private fun PassageRow(entry: HistoryItem, onClick: () -> Unit) {
     val label = entry.label
     val muted = label.discarded || label.outcome == CallOutcome.CANCELLED_BY_USER
     val accent = SesameAccentColors.current.barrier(entry.barrierIndex).container
@@ -408,78 +315,14 @@ private fun PassageRow(entry: HistoryItem.Passage, onClick: () -> Unit) {
                 )
             }
             Box(Modifier.align(Alignment.CenterVertically)) {
+                // Чипа «подтвердить» больше нет: разметка необязательна, и
+                // журнал не должен выглядеть списком недоделанных дел.
                 when {
-                    // «Подтвердить» важнее «сбоя»: сбой уже описан строкой ниже,
-                    // а вот метка, которую ещё не посмотрели глазами, — это
-                    // единственное, что от человека требуется.
-                    !label.confirmed ->
-                        StatusChip("подтвердить", Palette.AmberSurface, Palette.Amber)
-
                     label.outcome == CallOutcome.DIALER_FALLBACK ||
                         label.outcome == CallOutcome.NO_NUMBER ->
                         StatusChip("сбой", Palette.RecordChip, Palette.RecordChipText)
 
                     else -> Icon(
-                        imageVector = SesameIcons.ChevronRight,
-                        contentDescription = null,
-                        tint = Palette.TextDim,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** Строка сессии записи. Полоска коралловая — тот же цвет, что у «идёт запись». */
-@Composable
-private fun SessionRow(session: RecordingSession, onClick: () -> Unit) {
-    SesameSurface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Palette.Surface,
-        borderColor = Palette.BorderStrong,
-        corner = Dimens.CardCorner,
-        onClick = onClick,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 13.dp),
-            horizontalArrangement = Arrangement.spacedBy(Dimens.StackGap),
-        ) {
-            AccentBar(Palette.Record)
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
-                ) {
-                    Text(
-                        text = formatTime(session.startedAt),
-                        style = SesameText.Mono14,
-                        color = Tones.TextSoft,
-                    )
-                    Text(
-                        text = "Сессия записи",
-                        style = SesameText.CardTitle,
-                        color = Palette.TextPrimary,
-                    )
-                }
-                Text(
-                    text = sessionSubtitle(session),
-                    style = SesameText.Caption,
-                    color = Palette.TextMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Box(Modifier.align(Alignment.CenterVertically)) {
-                if (session.endedAt == null) {
-                    StatusChip("идёт", Palette.RecordChip, Palette.RecordChipText)
-                } else {
-                    Icon(
                         imageVector = SesameIcons.ChevronRight,
                         contentDescription = null,
                         tint = Palette.TextDim,
@@ -538,57 +381,6 @@ private fun passageSubtitle(label: PassageLabel): String {
         if (label.discarded) add("ошибочная")
     }
     return parts.joinToString(" · ").replaceFirstChar { it.uppercase() }
-}
-
-private fun sessionSubtitle(session: RecordingSession): String = buildString {
-    append("«").append(session.label.title()).append("» · ")
-    val ended = session.endedAt
-    if (ended == null) append("идёт сейчас") else append(formatDuration(ended - session.startedAt))
-    append(" · ").append(formatBytes(session.sizeBytes))
-}
-
-@Composable
-private fun SessionDetails(session: RecordingSession, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
-    ) {
-        Text(
-            text = "Сессия записи",
-            style = SesameText.DialogTitle.copy(fontSize = 22.sp),
-            color = Palette.TextPrimary,
-        )
-        Text(
-            text = "«${session.label.title()}» · начата ${formatDateTime(session.startedAt)}",
-            style = SesameText.Caption,
-            color = Palette.TextMuted,
-        )
-        Spacer(Modifier.height(Dimens.SpaceXs))
-        DetailRow("Длительность", session.endedAt?.let { formatDuration(it - session.startedAt) } ?: "идёт сейчас")
-        DetailRow("Объём", formatBytes(session.sizeBytes))
-        DetailRow("Выгружено", if (session.shared) "да" else "нет")
-        session.fileDir?.let { DetailRow("Файлы", it) }
-        FootNote(
-            "Файлы забираются с телефона по USB из Documents/Sesame/. Кнопка выгрузки " +
-                "в шапке собирает архив из всех ещё не выгруженных сессий.",
-        )
-    }
-}
-
-@Composable
-private fun DetailRow(title: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Dimens.StackGap),
-    ) {
-        Text(title, style = SesameText.Caption, color = Palette.TextMuted)
-        Text(
-            text = value,
-            style = SesameText.Mono13,
-            color = Palette.TextPrimary,
-            modifier = Modifier.weight(1f),
-        )
-    }
 }
 
 /**
@@ -810,7 +602,7 @@ private fun HistoryPreview() {
         HistoryContent(
             state = HistoryUiState(
                 items = listOf(
-                    HistoryItem.Passage(
+                    HistoryItem(
                         PassageLabel(
                             id = 1,
                             timestamp = now - 600_000,
@@ -823,17 +615,7 @@ private fun HistoryPreview() {
                         "Северный въезд",
                         0,
                     ),
-                    HistoryItem.Session(
-                        RecordingSession(
-                            id = 1,
-                            startedAt = now - 3_600_000,
-                            endedAt = now - 2_700_000,
-                            label = SessionLabel.GOING_HOME,
-                            sizeBytes = 42_000_000,
-                            fileDir = "Documents/Sesame/sessions/1",
-                        ),
-                    ),
-                    HistoryItem.Passage(
+                    HistoryItem(
                         PassageLabel(
                             id = 2,
                             timestamp = now - 90_000_000,
@@ -852,16 +634,13 @@ private fun HistoryPreview() {
                     Barrier(id = 1, label = "Шлагбаум A", phoneNumber = null, lat = null, lon = null, name = "Северный въезд"),
                     Barrier(id = 2, label = "Шлагбаум B", phoneNumber = null, lat = null, lon = null, name = "Южный въезд"),
                 ),
-                unconfirmedCount = 1,
-                unsharedCount = 1,
             ),
-            onFilter = {},
+            onBack = {},
             onDirection = { _, _ -> },
             onMode = { _, _ -> },
             onDiscarded = { _, _ -> },
             onNote = { _, _ -> },
             onConfirm = {},
-            onShare = {},
             onAddManual = { _, _, _, _, _ -> },
             onMessageShown = {},
         )

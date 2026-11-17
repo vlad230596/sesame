@@ -9,6 +9,7 @@ import com.google.android.gms.location.ActivityTransitionResult
 import com.google.android.gms.location.DetectedActivity
 import com.vlad230596.sesame.data.CollectorJournal
 import com.vlad230596.sesame.data.LogEventType
+import com.vlad230596.sesame.sensors.MotionGate
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -32,16 +33,17 @@ class ActivityTransitionReceiver : BroadcastReceiver() {
     @InstallIn(SingletonComponent::class)
     interface ActivityEntryPoint {
         fun journal(): CollectorJournal
+        fun motionGate(): MotionGate
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         if (!ActivityTransitionResult.hasResult(intent)) return
         val result = ActivityTransitionResult.extractResult(intent) ?: return
-        val journal = runCatching {
-            EntryPointAccessors
-                .fromApplication(context.applicationContext, ActivityEntryPoint::class.java)
-                .journal()
+        val entryPoint = runCatching {
+            EntryPointAccessors.fromApplication(context.applicationContext, ActivityEntryPoint::class.java)
         }.getOrNull() ?: return
+        val journal = entryPoint.journal()
+        val motion = entryPoint.motionGate()
 
         val nowMillis = System.currentTimeMillis()
         val nowNanos = SystemClock.elapsedRealtimeNanos()
@@ -64,6 +66,11 @@ class ActivityTransitionReceiver : BroadcastReceiver() {
                 eventTime = nowMillis - ageMillis,
                 elapsedRealtimeNanos = event.elapsedRealTimeNanos,
             )
+            // Единственное исключение из «только журнал»: переход подсказывает
+            // [MotionGate], просить ли локацию. Запусков и уведомлений здесь нет.
+            if (event.transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER) {
+                motion.onActivityEnter(activityName(event.activityType))
+            }
         }
     }
 

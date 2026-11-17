@@ -69,6 +69,7 @@ class PromptController @Inject constructor(
     private val store: DataFileStore,
     private val permissions: PermissionsChecker,
     private val parkingRepository: ParkingRepository,
+    private val motion: com.vlad230596.sesame.sensors.MotionGate,
 ) {
 
     private val serial = Dispatchers.Default.limitedParallelism(1)
@@ -132,7 +133,9 @@ class PromptController @Inject constructor(
     // --- входы ---------------------------------------------------------------------
 
     fun onBluetooth(connected: Boolean, address: String?, at: Long = now()) = post {
-        if (!active || address == null || address != config.carBluetoothAddress) return@post
+        if (address == null || address != config.carBluetoothAddress) return@post
+        motion.onCarConnection(connected)
+        if (!active) return@post
         if (connected == engine.carConnected) return@post
         if (connected) tail.clear()
         apply(if (connected) engine.onCarConnected(at) else engine.onCarDisconnected(at))

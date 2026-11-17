@@ -3,7 +3,6 @@ package com.vlad230596.sesame.ui.common
 import com.vlad230596.sesame.data.CallOutcome
 import com.vlad230596.sesame.data.Direction
 import com.vlad230596.sesame.data.LabelSource
-import com.vlad230596.sesame.data.SessionLabel
 import com.vlad230596.sesame.data.TravelMode
 import java.time.Instant
 import java.time.LocalDate
@@ -179,22 +178,6 @@ fun CallOutcome.title(): String = when (this) {
     CallOutcome.NO_NUMBER -> "номер не задан"
     CallOutcome.CANCELLED_BY_USER -> "отменено"
 }
-
-fun SessionLabel.title(): String = when (this) {
-    SessionLabel.GOING_HOME -> "Еду домой"
-    SessionLabel.LEAVING_HOME -> "Еду из дома"
-    SessionLabel.ON_FOOT -> "Пешком"
-    SessionLabel.OTHER -> "Другое"
-    SessionLabel.NONE -> "Без метки"
-}
-
-/** Порядок кнопок на экране выбора метки сессии (§4.3). */
-val SESSION_LABEL_CHOICES = listOf(
-    SessionLabel.GOING_HOME,
-    SessionLabel.LEAVING_HOME,
-    SessionLabel.ON_FOOT,
-    SessionLabel.OTHER,
-)
 
 internal fun localDateOf(epochMillis: Long): LocalDate =
     Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).toLocalDate()

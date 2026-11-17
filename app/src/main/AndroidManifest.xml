@@ -33,15 +33,6 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!--
-        §4.3, §12.3. Интенсивная сессия держит PARTIAL_WAKE_LOCK: foreground service
-        сам по себе не мешает системе усыпить процессор, а не-wakeup датчики при
-        засыпании перестают доставлять отсчёты, и 15 минут при погашенном экране
-        не записались бы полностью. Пассивный слой wake lock не берёт — там ту же
-        задачу решает аппаратная пакетная передача.
-    -->
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-
-    <!--
         NEXT-notification-and-car.md §4.1. Интернет — впервые в приложении и
         ТОЛЬКО для тайлов карты «Где машина» (OSM через osmdroid). Больше ни для
         чего: координаты, журнал и номера никуда не отправляются, запросы к

@@ -152,8 +152,21 @@ fun CarMap(
 
     // Текущая позиция — только при выданном разрешении: без него провайдер
     // упал бы на подписке. Само разрешение запрашивает экран разрешений.
+    // Провайдер — только сеть и раз в 10 с: точка «я» на карте машины нужна
+    // для ориентира, а GPS на 1 Гц при каждом открытии экрана жёг батарею и
+    // зажигал значок геолокации.
     val myLocation = remember(locationPermitted) {
-        if (locationPermitted) MyLocationNewOverlay(GpsMyLocationProvider(context), mapView) else null
+        if (locationPermitted) {
+            val provider = GpsMyLocationProvider(context).apply {
+                clearLocationSources()
+                addLocationSource(android.location.LocationManager.NETWORK_PROVIDER)
+                locationUpdateMinTime = 10_000L
+                locationUpdateMinDistance = 10f
+            }
+            MyLocationNewOverlay(provider, mapView)
+        } else {
+            null
+        }
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current

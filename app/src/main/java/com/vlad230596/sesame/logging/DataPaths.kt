@@ -26,12 +26,12 @@ import javax.inject.Singleton
  *    каталог приложения (`/data/data/...`), не `Android/data/`: последний не виден
  *    по USB и всё равно стирается при удалении приложения, то есть не даёт ничего;
  * 2. готовый файл копируется в `Documents/Sesame/...` через `MediaStore`
- *    ([MediaStorePublisher]) — по завершении сессии, при суточной ротации
+ *    ([MediaStorePublisher]) — при суточной ротации
  *    пассивного слоя и раз в [DataFileStore.PASSIVE_PUBLISH_INTERVAL_MILLIS]
  *    для текущих суток.
  *
- * Итог: под угрозой переустановки остаётся только незавершённая сессия и
- * последние минуты текущих суток, а не датасет.
+ * Итог: под угрозой переустановки остаются только последние минуты текущих
+ * суток, а не датасет.
  */
 @Singleton
 class DataPaths @Inject constructor(
@@ -40,8 +40,6 @@ class DataPaths @Inject constructor(
 
     /** Горячий путь записи. Внутреннее хранилище: не `Android/data/` (§7). */
     val stagingRoot: File get() = File(context.filesDir, "collect")
-
-    fun sessionStagingDir(sessionId: Long): File = File(stagingRoot, "sessions/$sessionId")
 
     fun passiveStagingDir(date: LocalDate): File =
         File(stagingRoot, "passive/${DATE_FORMAT.format(date)}")
@@ -52,15 +50,11 @@ class DataPaths @Inject constructor(
     fun journalDayStagingDir(date: LocalDate): File =
         File(journalStagingDir, DATE_FORMAT.format(date))
 
-    /** `Documents/Sesame/sessions/<session-id>/` (§5). */
-    fun sessionPublishedDir(sessionId: Long): String =
-        "${GzipCsvWriter.ROOT_RELATIVE_PATH}/sessions/$sessionId"
-
     /** `Documents/Sesame/passive/<YYYY-MM-DD>/` (§5). */
     fun passivePublishedDir(date: LocalDate): String =
         "${GzipCsvWriter.ROOT_RELATIVE_PATH}/passive/${DATE_FORMAT.format(date)}"
 
-    /** `Documents/Sesame/journal/` — снимки меток и сессий (§5, §7). */
+    /** `Documents/Sesame/journal/` — снимок меток (§5, §7). */
     val journalPublishedDir: String get() = "${GzipCsvWriter.ROOT_RELATIVE_PATH}/journal"
 
     /** `Documents/Sesame/journal/<YYYY-MM-DD>/` — события журнала за сутки (§5, §7). */

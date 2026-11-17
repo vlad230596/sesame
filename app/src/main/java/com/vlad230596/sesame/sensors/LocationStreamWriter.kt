@@ -47,6 +47,7 @@ class LocationStreamWriter(
         LocationServices.getFusedLocationProviderClient(context)
 
     private var callback: LocationCallback? = null
+    private var looper: Looper? = null
 
     /** Последняя записанная локация: догадки `direction`/`mode` в §4.5 — следующий заход. */
     @Volatile
@@ -67,7 +68,29 @@ class LocationStreamWriter(
         if (!hasPermission) return false
 
         store.declareStream(streamKey) { SensorStreams.LOCATION_COLUMNS }
+        this.looper = looper
+        return subscribe(priority, intervalMillis, minDisplacementMeters, looper)
+    }
 
+    /**
+     * Сменить параметры уже идущей подписки: снять старую и оформить новую.
+     * Так пассивный слой переключается между движением и покоем ([MotionGate]).
+     */
+    fun reconfigure(priority: LocationPriority, intervalMillis: Long, minDisplacementMeters: Float): Boolean {
+        val currentLooper = looper ?: return false
+        val old = callback ?: return false
+        callback = null
+        runCatching { client.removeLocationUpdates(old) }
+        return subscribe(priority, intervalMillis, minDisplacementMeters, currentLooper)
+    }
+
+    private fun subscribe(
+        priority: LocationPriority,
+        intervalMillis: Long,
+        minDisplacementMeters: Float,
+        looper: Looper,
+    ): Boolean {
+        if (!hasPermission) return false
         val request = LocationRequest.Builder(priority.toGmsPriority(), intervalMillis)
             .setMinUpdateIntervalMillis(intervalMillis)
             .setMinUpdateDistanceMeters(minDisplacementMeters)

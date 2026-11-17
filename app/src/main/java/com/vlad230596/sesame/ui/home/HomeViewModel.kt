@@ -9,22 +9,14 @@ import com.vlad230596.sesame.call.CallBarrierRequest
 import com.vlad230596.sesame.call.CallBarrierUseCase
 import com.vlad230596.sesame.data.BarrierRepository
 import com.vlad230596.sesame.data.CallOutcome
-import com.vlad230596.sesame.data.Direction
 import com.vlad230596.sesame.data.LabelSource
-import com.vlad230596.sesame.data.PassageLabelRepository
-import com.vlad230596.sesame.data.SessionLabel
 import com.vlad230596.sesame.data.StorageUsageRepository
-import com.vlad230596.sesame.data.TravelMode
 import com.vlad230596.sesame.data.dao.LogEventDao
 import com.vlad230596.sesame.data.entity.Barrier
-import com.vlad230596.sesame.data.entity.PassageLabel
 import com.vlad230596.sesame.data.prefs.SesameSettings
 import com.vlad230596.sesame.data.prefs.SettingsRepository
 import com.vlad230596.sesame.logging.CollectorHeartbeat
 import com.vlad230596.sesame.service.CollectorService
-import com.vlad230596.sesame.session.ActiveSession
-import com.vlad230596.sesame.session.RecordingSessionController
-import com.vlad230596.sesame.ui.common.title
 import com.vlad230596.sesame.ui.permissions.PermissionSpec
 import com.vlad230596.sesame.ui.permissions.PermissionsChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -64,8 +56,6 @@ data class HomeUiState(
     val barriers: List<Barrier> = emptyList(),
     val settings: SesameSettings = SesameSettings(),
     val countdown: CountdownState? = null,
-    val session: ActiveSession? = null,
-    val unconfirmed: List<PassageLabel> = emptyList(),
     val lastEventAt: Long? = null,
     val usedBytes: Long = 0,
     val serviceRunning: Boolean = false,
@@ -73,7 +63,6 @@ data class HomeUiState(
     val now: Long = System.currentTimeMillis(),
     val message: String? = null,
 ) {
-    val unconfirmedCount: Int get() = unconfirmed.size
     fun barrierLabel(id: Long?): String? =
         barriers.firstOrNull { it.id == id }?.displayName
 }
@@ -81,17 +70,14 @@ data class HomeUiState(
 /**
  * Главный экран (§4.7).
  *
- * Вся «живость» экрана — таймер отмены, оставшееся время сессии и давность
- * последнего фонового события — считается здесь: композиции остаётся только
+ * Вся «живость» экрана — таймер отмены и давность последнего фонового события — считается здесь: композиции остаётся только
  * рисовать.
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val barrierRepository: BarrierRepository,
-    private val passageLabels: PassageLabelRepository,
     private val settingsRepository: SettingsRepository,
-    private val sessions: RecordingSessionController,
     private val callBarrier: CallBarrierUseCase,
     private val permissionsChecker: PermissionsChecker,
     logEventDao: LogEventDao,
@@ -110,13 +96,10 @@ class HomeViewModel @Inject constructor(
 
     private val local = MutableStateFlow(Local())
     private var countdownJob: Job? = null
-    private var lastAutoStoppedSessionId: Long? = null
 
     val state: StateFlow<HomeUiState> = combine(
         barrierRepository.observeAll(),
         settingsRepository.settings,
-        sessions.active,
-        passageLabels.observeUnconfirmed(),
         // «Последнее фоновое событие» (§4.7) — это максимум из журнала событий и
         // момента, когда поток записи последний раз положил на диск отсчёт
         // датчика: ночью в покое журнал молчит часами при совершенно живом сборе.
@@ -129,12 +112,10 @@ class HomeViewModel @Inject constructor(
         ) { lastEvent, lastSample, size ->
             maxOf(lastEvent ?: 0L, lastSample ?: 0L).takeIf { it > 0L } to size
         },
-    ) { barriers, settings, session, unconfirmed, (lastEvent, size) ->
+    ) { barriers, settings, (lastEvent, size) ->
         HomeUiState(
             barriers = barriers,
             settings = settings,
-            session = session,
-            unconfirmed = unconfirmed,
             lastEventAt = lastEvent,
             usedBytes = size,
         )
@@ -151,11 +132,9 @@ class HomeViewModel @Inject constructor(
     init {
         viewModelScope.launch { barrierRepository.ensureSeeded() }
         viewModelScope.launch {
-            // Секунда — достаточная частота: на экране обновляются «N минут назад»
-            // и обратный отсчёт сессии, оба в минутах и секундах.
+            // Секунда — достаточная частота: на экране обновляется «N минут назад».
             while (true) {
                 local.update { it.copy(now = System.currentTimeMillis()) }
-                stopSessionIfExpired()
                 delay(1_000)
             }
         }
@@ -261,83 +240,6 @@ class HomeViewModel @Inject constructor(
             CallOutcome.CANCELLED_BY_USER -> "Отменено"
         }
         local.update { it.copy(message = message) }
-    }
-
-    // --- Интенсивная запись (§4.3) ------------------------------------------------
-
-    fun startSession(label: SessionLabel) {
-        viewModelScope.launch {
-            sessions.start(label)
-            local.update {
-                it.copy(
-                    message = if (label == SessionLabel.NONE) {
-                        "Запись начата без метки — проставьте её потом в истории"
-                    } else {
-                        "Запись начата: ${label.title()}"
-                    },
-                )
-            }
-        }
-    }
-
-    fun extendSession() {
-        viewModelScope.launch {
-            val minutes = state.value.settings.recordingDurationMinutes
-            sessions.extend(minutes)
-            local.update { it.copy(message = "Запись продлена на $minutes мин") }
-        }
-    }
-
-    fun stopSession() {
-        viewModelScope.launch {
-            sessions.stop()
-            local.update { it.copy(message = "Запись остановлена") }
-        }
-    }
-
-    /**
-     * Вторая линия жёсткого предохранителя (§4.3). Первая и главная — сторож в
-     * [CollectorService]: он живёт, пока живёт сбор, а не пока открыт экран.
-     * Здесь остановка дублируется на случай, когда сервис по какой-то причине не
-     * поднялся, а экран открыт: увидеть на главном экране бесконечно идущую
-     * запись хуже, чем остановить её дважды.
-     *
-     * Запоминаем последнюю остановленную сессию: пока на состояние никто не
-     * подписан, [state] отдаёт последнее значение, и без этой защиты тикер
-     * пытался бы останавливать уже закрытую сессию каждую секунду.
-     */
-    private suspend fun stopSessionIfExpired() {
-        val session = state.value.session ?: return
-        if (session.id == lastAutoStoppedSessionId) return
-        if (System.currentTimeMillis() >= session.plannedEndAt) {
-            lastAutoStoppedSessionId = session.id
-            sessions.stop(reason = CollectorService.STOP_REASON_TIMER)
-            local.update { it.copy(message = "Запись остановлена по таймеру") }
-        }
-    }
-
-    // --- Правка меток из плашки «без подтверждения» (§4.5) ------------------------
-
-    fun setDirection(id: Long, direction: Direction) {
-        viewModelScope.launch { passageLabels.setDirection(id, direction) }
-    }
-
-    fun setMode(id: Long, mode: TravelMode) {
-        viewModelScope.launch { passageLabels.setMode(id, mode) }
-    }
-
-    fun setDiscarded(id: Long, discarded: Boolean) {
-        viewModelScope.launch { passageLabels.setDiscarded(id, discarded) }
-    }
-
-    fun setNote(id: Long, note: String) {
-        viewModelScope.launch { passageLabels.setNote(id, note) }
-    }
-
-    fun confirmAll() {
-        viewModelScope.launch {
-            state.value.unconfirmed.forEach { passageLabels.confirm(it.id) }
-        }
     }
 
     // --- Сервис сбора (§9) --------------------------------------------------------

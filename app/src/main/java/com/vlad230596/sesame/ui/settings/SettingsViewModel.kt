@@ -19,9 +19,6 @@ import com.vlad230596.sesame.data.entity.Barrier
 import com.vlad230596.sesame.data.prefs.LocationPriority
 import com.vlad230596.sesame.data.prefs.SesameSettings
 import com.vlad230596.sesame.data.prefs.SettingsRepository
-import com.vlad230596.sesame.ui.common.ArchiveResult
-import com.vlad230596.sesame.ui.common.ArchiveShareUseCase
-import com.vlad230596.sesame.ui.common.ShareRequest
 import com.vlad230596.sesame.ui.permissions.PermissionsChecker
 import com.vlad230596.sesame.widget.WidgetCallCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -59,9 +56,6 @@ data class SettingsUiState(
     /** Первое отвалившееся разрешение: плашка называет его по имени. */
     val missingHint: String? = null,
     val usedBytes: Long = 0,
-    val unsharedCount: Int = 0,
-    val preparingArchive: Boolean = false,
-    val shareRequest: ShareRequest? = null,
     val message: String? = null,
 )
 
@@ -76,7 +70,6 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val widgets: WidgetCallCoordinator,
     private val permissions: PermissionsChecker,
-    private val archive: ArchiveShareUseCase,
     private val callBarrier: CallBarrierUseCase,
     storage: StorageUsageRepository,
 ) : ViewModel() {
@@ -86,9 +79,6 @@ class SettingsViewModel @Inject constructor(
         val bluetoothDevices: List<BluetoothDeviceOption> = emptyList(),
         val missingPermissions: Int = 0,
         val missingHint: String? = null,
-        val unsharedCount: Int = 0,
-        val preparingArchive: Boolean = false,
-        val shareRequest: ShareRequest? = null,
         val message: String? = null,
     )
 
@@ -108,9 +98,6 @@ class SettingsViewModel @Inject constructor(
             missingPermissions = l.missingPermissions,
             missingHint = l.missingHint,
             usedBytes = usedBytes,
-            unsharedCount = l.unsharedCount,
-            preparingArchive = l.preparingArchive,
-            shareRequest = l.shareRequest,
             message = l.message,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
@@ -146,9 +133,6 @@ class SettingsViewModel @Inject constructor(
                 missingPermissions = missing.size,
                 missingHint = missing.firstOrNull()?.title,
             )
-        }
-        viewModelScope.launch {
-            local.update { it.copy(unsharedCount = runCatching { archive.unsharedCount() }.getOrDefault(0)) }
         }
     }
 
@@ -287,10 +271,6 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setCancelTimeoutSeconds(seconds) }
     }
 
-    fun setRecordingMinutes(minutes: Int) {
-        viewModelScope.launch { settingsRepository.setRecordingDurationMinutes(minutes) }
-    }
-
     fun setLocationInterval(seconds: Int) {
         viewModelScope.launch { settingsRepository.setLocationIntervalSeconds(seconds) }
     }
@@ -320,50 +300,6 @@ class SettingsViewModel @Inject constructor(
 
     fun setPhoneAccount(id: String?) {
         viewModelScope.launch { settingsRepository.setPhoneAccountId(id) }
-    }
-
-    /** «Экспорт в архив» (§7) — тот же архив, что кнопка в истории. */
-    fun requestShare() {
-        if (local.value.preparingArchive) return
-        viewModelScope.launch {
-            local.update { it.copy(preparingArchive = true) }
-            when (val result = archive.prepare()) {
-                ArchiveResult.Empty -> local.update {
-                    it.copy(
-                        preparingArchive = false,
-                        message = "Нечего выгружать: всё уже отмечено как выгруженное",
-                    )
-                }
-
-                ArchiveResult.NoFiles -> local.update {
-                    it.copy(
-                        preparingArchive = false,
-                        message = "Файлы сессий не найдены. Проверьте Documents/Sesame/",
-                    )
-                }
-
-                is ArchiveResult.Ready -> local.update {
-                    it.copy(preparingArchive = false, shareRequest = result.request)
-                }
-            }
-        }
-    }
-
-    fun onShareLaunched(sessionIds: List<Long>) {
-        viewModelScope.launch {
-            archive.markShared(sessionIds)
-            local.update {
-                it.copy(
-                    shareRequest = null,
-                    unsharedCount = 0,
-                    message = "Отправлено и отмечено выгруженным: ${sessionIds.size}",
-                )
-            }
-        }
-    }
-
-    fun onShareFailed() {
-        local.update { it.copy(shareRequest = null, message = "Не нашлось приложения для отправки") }
     }
 
     fun dismissMessage() = local.update { it.copy(message = null) }

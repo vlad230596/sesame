@@ -30,7 +30,7 @@ class MediaStorePublisher @Inject constructor(
         get() = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
 
     /**
-     * @param relativeDir каталог вида `Documents/Sesame/sessions/12` (без слеша на конце).
+     * @param relativeDir каталог вида `Documents/Sesame/passive/2026-01-01` (без слеша на конце).
      * @return `true`, если файл лежит в `Documents/Sesame/` в актуальном виде.
      */
     fun publish(source: File, relativeDir: String): Boolean {

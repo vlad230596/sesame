@@ -106,6 +106,10 @@ data class SesameSettings(
         const val MIN_RECORDING_MINUTES = 1
         const val MAX_RECORDING_MINUTES = 120
 
+        /**
+         * Интервал локации **в движении**. В покое пассивный слой своих фиксов не
+         * просит вовсе ([com.vlad230596.sesame.sensors.MotionGate]).
+         */
         const val DEFAULT_LOCATION_INTERVAL_SECONDS = 120
         const val MIN_LOCATION_INTERVAL_SECONDS = 10
         const val MAX_LOCATION_INTERVAL_SECONDS = 900
@@ -113,10 +117,24 @@ data class SesameSettings(
         const val DEFAULT_LOCATION_DISPLACEMENT_METERS = 25
         const val MAX_LOCATION_DISPLACEMENT_METERS = 200
 
+        /**
+         * Акселерометр — главный дешёвый признак движения для [com.vlad230596.sesame.sensors.MotionGate].
+         * Шаг человека — 1.5–2.5 Гц, по Найквисту нужно ≥ 4–5 Гц; 5 Гц — минимум,
+         * при котором ходьба уверенно отличается от телефона на столе. Отсчёты
+         * копятся в FIFO датчика и доставляются раз в 10 с, поэтому цена — доли
+         * процента батареи. Ниже 5 Гц детектор движения слепнет, выше — данных
+         * больше, а решений лучше не становится.
+         */
         const val DEFAULT_ACCELEROMETER_HZ = 5
-        const val MIN_ACCELEROMETER_HZ = 1
+        const val MIN_ACCELEROMETER_HZ = 5
         const val MAX_ACCELEROMETER_HZ = 50
 
+        /**
+         * Барометр — смена высоты: этаж подземной парковки, подъезд, мост. Давление
+         * меняется медленно (1 м высоты ≈ 0.12 гПа), 1 Гц с запасом хватает, а
+         * это минимум настройки в целых герцах. Датчик потребляет микроамперы и
+         * тоже идёт пачками.
+         */
         const val DEFAULT_BAROMETER_HZ = 1
         const val MIN_BAROMETER_HZ = 1
         const val MAX_BAROMETER_HZ = 10

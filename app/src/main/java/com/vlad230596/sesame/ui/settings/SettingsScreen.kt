@@ -29,7 +29,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -59,6 +58,7 @@ import com.vlad230596.sesame.ui.common.ThinProgress
 import com.vlad230596.sesame.ui.common.Tones
 import com.vlad230596.sesame.ui.common.formatBytes
 import com.vlad230596.sesame.ui.common.maskPhone
+import com.vlad230596.sesame.ui.history.HistoryScreen
 import com.vlad230596.sesame.ui.permissions.PermissionsScreen
 import com.vlad230596.sesame.ui.theme.Dimens
 import com.vlad230596.sesame.ui.theme.Palette
@@ -72,6 +72,7 @@ private sealed interface SettingsRoute {
     data object Collection : SettingsRoute
     data object Permissions : SettingsRoute
     data object Home : SettingsRoute
+    data object Journal : SettingsRoute
     data class BarrierEdit(val barrierId: Long) : SettingsRoute
 }
 
@@ -104,6 +105,7 @@ fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
                     SettingsRoute.Collection -> -1L
                     SettingsRoute.Permissions -> -2L
                     SettingsRoute.Home -> -3L
+                    SettingsRoute.Journal -> -4L
                     is SettingsRoute.BarrierEdit -> it.barrierId
                 }
             },
@@ -113,31 +115,16 @@ fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
                     -1L -> SettingsRoute.Collection
                     -2L -> SettingsRoute.Permissions
                     -3L -> SettingsRoute.Home
+                    -4L -> SettingsRoute.Journal
                     else -> SettingsRoute.BarrierEdit(it)
                 }
             },
         ),
     ) { mutableStateOf<SettingsRoute>(SettingsRoute.Root) }
 
-    val context = LocalContext.current
-
     LifecycleResumeEffect(Unit) {
         viewModel.refresh()
         onPauseOrDispose { }
-    }
-
-    // Share sheet поднимается из композиции: ViewModel не должна знать про Activity.
-    LaunchedEffect(state.shareRequest) {
-        val request = state.shareRequest ?: return@LaunchedEffect
-        val started = runCatching {
-            context.startActivity(
-                android.content.Intent.createChooser(
-                    request.intent,
-                    request.description.ifBlank { "Выгрузить сессии" },
-                ),
-            )
-        }.isSuccess
-        if (started) viewModel.onShareLaunched(request.sessionIds) else viewModel.onShareFailed()
     }
 
     BackHandler(enabled = route != SettingsRoute.Root) { route = SettingsRoute.Root }
@@ -158,12 +145,11 @@ fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
         SettingsRoute.Root -> SettingsContent(
             state = state,
             onCancelTimeout = viewModel::setCancelTimeout,
-            onRecordingMinutes = viewModel::setRecordingMinutes,
             onPhoneAccount = viewModel::setPhoneAccount,
             onPromptEnabled = viewModel::setPromptEnabled,
             onCarBluetooth = viewModel::setCarBluetooth,
             onCarPlace = viewModel::setCarPlace,
-            onExport = viewModel::requestShare,
+            onOpenJournal = { route = SettingsRoute.Journal },
             onOpenBarrier = { route = SettingsRoute.BarrierEdit(it.id) },
             onOpenHome = { route = SettingsRoute.Home },
             onOpenCollection = { route = SettingsRoute.Collection },
@@ -191,6 +177,10 @@ fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
                 )
             }
         }
+
+        // Журнал проездов (§4.5) — вторичный экран: разметка необязательна,
+        // поэтому отдельной вкладки у него больше нет.
+        SettingsRoute.Journal -> HistoryScreen(onBack = { route = SettingsRoute.Root })
 
         SettingsRoute.Permissions -> SubScreenScaffold(
             title = "Разрешения",
@@ -248,12 +238,11 @@ fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
 private fun SettingsContent(
     state: SettingsUiState,
     onCancelTimeout: (Int) -> Unit,
-    onRecordingMinutes: (Int) -> Unit,
     onPhoneAccount: (String?) -> Unit,
     onPromptEnabled: (Boolean) -> Unit,
     onCarBluetooth: (BluetoothDeviceOption?) -> Unit,
     onCarPlace: (String) -> Unit,
-    onExport: () -> Unit,
+    onOpenJournal: () -> Unit,
     onOpenBarrier: (Barrier) -> Unit,
     onOpenHome: () -> Unit,
     onOpenCollection: () -> Unit,
@@ -309,7 +298,7 @@ private fun SettingsContent(
                     }
                 }
 
-                GroupCaption("Звонок и запись")
+                GroupCaption("Звонок и сбор")
                 SettingsGroup {
                     // §4.1: 0 — звонить сразу, без подтверждения. Это не «выключено»,
                     // а отдельный осмысленный режим, поэтому он стоит шагом шкалы,
@@ -326,26 +315,6 @@ private fun SettingsContent(
                             SesameSettings.MAX_CANCEL_TIMEOUT_SECONDS,
                         onMinus = { onCancelTimeout(state.settings.cancelTimeoutSeconds - 1) },
                         onPlus = { onCancelTimeout(state.settings.cancelTimeoutSeconds + 1) },
-                        valueWidth = 62.dp,
-                    )
-                    GroupDivider()
-                    StepperRow(
-                        title = "Длительность записи",
-                        value = "${state.settings.recordingDurationMinutes} мин",
-                        minusEnabled = state.settings.recordingDurationMinutes >
-                            SesameSettings.MIN_RECORDING_MINUTES,
-                        plusEnabled = state.settings.recordingDurationMinutes <
-                            SesameSettings.MAX_RECORDING_MINUTES,
-                        onMinus = {
-                            onRecordingMinutes(
-                                RecordingMinuteSteps.previous(state.settings.recordingDurationMinutes),
-                            )
-                        },
-                        onPlus = {
-                            onRecordingMinutes(
-                                RecordingMinuteSteps.next(state.settings.recordingDurationMinutes),
-                            )
-                        },
                         valueWidth = 62.dp,
                     )
                     GroupDivider()
@@ -433,29 +402,12 @@ private fun SettingsContent(
                         )
                     }
                     GroupDivider()
-                    GroupRow(onClick = if (state.preparingArchive) null else onExport) {
-                        Text(
-                            text = if (state.preparingArchive) "Собираю архив…" else "Экспорт в архив",
-                            style = SesameText.Body.copy(fontWeight = FontWeight.Medium),
-                            color = Palette.TextPrimary,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (state.unsharedCount > 0) {
-                            Text(
-                                text = "${state.unsharedCount}",
-                                style = SesameText.Mono13,
-                                color = Palette.Amber,
-                            )
-                        }
-                        Icon(
-                            imageVector = SesameIcons.Export,
-                            contentDescription = null,
-                            tint = Palette.TextDim,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
+                    // Журнал и разметка — по желанию: строка стоит внизу, рядом с
+                    // хранилищем, и без счётчиков неразмеченного.
+                    NavGroupRow(
+                        title = "Журнал проездов",
+                        onClick = onOpenJournal,
+                    )
                 }
 
                 GroupCaption("Система")
@@ -654,20 +606,6 @@ private fun PermissionAlert(hint: String?, count: Int, onClick: () -> Unit) {
     }
 }
 
-/**
- * Шаги длительности записи.
- *
- * Не равномерная шкала: между 1 и 15 минутами разница смысловая («проверить, что
- * пишется» против «доехать до работы»), а между 90 и 120 — почти никакой.
- */
-internal object RecordingMinuteSteps {
-    private val values = listOf(1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120)
-
-    fun next(current: Int): Int = values.firstOrNull { it > current } ?: values.last()
-
-    fun previous(current: Int): Int = values.lastOrNull { it < current } ?: values.first()
-}
-
 private val previewBarriers = listOf(
     Barrier(id = 1, label = "Шлагбаум A", phoneNumber = "+7 900 000-00-14", lat = 55.75124, lon = 37.61841, name = "Северный въезд"),
     Barrier(id = 2, label = "Шлагбаум B", phoneNumber = null, lat = null, lon = null, name = "Южный въезд"),
@@ -684,15 +622,13 @@ private fun SettingsPreview() {
                 missingPermissions = 1,
                 missingHint = "Локация в фоне",
                 usedBytes = 2_400_000_000,
-                unsharedCount = 2,
             ),
             onCancelTimeout = {},
-            onRecordingMinutes = {},
             onPhoneAccount = {},
             onPromptEnabled = {},
             onCarBluetooth = {},
             onCarPlace = {},
-            onExport = {},
+            onOpenJournal = {},
             onOpenBarrier = {},
             onOpenHome = {},
             onOpenCollection = {},

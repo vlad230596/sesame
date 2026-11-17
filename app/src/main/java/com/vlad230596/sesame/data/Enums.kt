@@ -108,6 +108,12 @@ enum class LogEventType {
     APPROACH_ZONE_ON,
     APPROACH_ZONE_OFF,
 
+    /**
+     * Пассивная локация сменила режим ([com.vlad230596.sesame.sensors.MotionGate]):
+     * MOVING — свой запрос по настройкам, STILL — только чужие фиксы.
+     */
+    LOCATION_MODE,
+
     /** Машину отключили — точка парковки; и смена «во дворе / за двором». */
     CAR_PARKED,
     CAR_PLACE_CHANGED,

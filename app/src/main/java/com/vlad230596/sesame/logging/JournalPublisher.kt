@@ -3,10 +3,8 @@ package com.vlad230596.sesame.logging
 import android.util.Log
 import com.vlad230596.sesame.data.dao.LogEventDao
 import com.vlad230596.sesame.data.dao.PassageLabelDao
-import com.vlad230596.sesame.data.dao.RecordingSessionDao
 import com.vlad230596.sesame.data.entity.LogEvent
 import com.vlad230596.sesame.data.entity.PassageLabel
-import com.vlad230596.sesame.data.entity.RecordingSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -19,11 +17,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Выгрузка журнала событий, меток проездов и сессий из Room в
+ * Выгрузка журнала событий и меток проездов из Room в
  * `Documents/Sesame/journal/` (§5, §7).
  *
- * **Зачем.** Потоки датчиков публикуются файлами, а журнал, разметка и строки
- * сессий жили только в приватной базе. У release-сборки нет ни `run-as`, ни
+ * **Зачем.** Потоки датчиков публикуются файлами, а журнал и разметка жили
+ * только в приватной базе. У release-сборки нет ни `run-as`, ни
  * adb backup, так что забрать их с телефона было нельзя, а переустановка их
  * стирала — то есть без этого класса датасет терял ровно ту часть, ради
  * которой собирается: события с задержками доставки (§4.4) и метки (§4.5).
@@ -32,9 +30,12 @@ import javax.inject.Singleton
  *
  * - `journal/<YYYY-MM-DD>/events.csv.gz` — события, чей `eventTime` приходится
  *   на эти местные сутки (та же зона, что у пассивного слоя, [DataPaths.localDate]);
- * - `journal/labels.csv.gz`, `journal/sessions.csv.gz` — полные снимки таблиц.
- *   Снимок, а не дописывание: метки подтверждаются и правятся задним числом, и
- *   файл обязан отражать последнее состояние, а не историю правок.
+ * - `journal/labels.csv.gz` — полный снимок таблицы меток. Снимок, а не
+ *   дописывание: метки подтверждаются и правятся задним числом, и файл обязан
+ *   отражать последнее состояние, а не историю правок.
+ *
+ * Прежний `journal/sessions.csv.gz` больше не пересобирается: интенсивная запись
+ * убрана, уже выгруженный файл остаётся как есть.
  *
  * **Почему файлы пересобираются целиком.** Источник истины — Room, объём —
  * тысячи строк, а [MediaStorePublisher] перезаписывает файл на месте. Пересборка
@@ -51,7 +52,6 @@ import javax.inject.Singleton
 class JournalPublisher @Inject constructor(
     private val logEventDao: LogEventDao,
     private val passageLabelDao: PassageLabelDao,
-    private val sessionDao: RecordingSessionDao,
     private val paths: DataPaths,
     private val publisher: MediaStorePublisher,
 ) {
@@ -62,7 +62,7 @@ class JournalPublisher @Inject constructor(
     private var lastPublishStartedAt: Long? = null
 
     /**
-     * Все сутки, в которых есть события, плюс оба снимка. Догоняет историю,
+     * Все сутки, в которых есть события, плюс снимок меток. Догоняет историю,
      * накопленную до появления выгрузки, и восстанавливает `Documents/Sesame/`
      * после переустановки — в той мере, в какой база ещё жива.
      */
@@ -75,7 +75,7 @@ class JournalPublisher @Inject constructor(
     }
 
     /**
-     * Текущие сутки и оба снимка — раз в [DataFileStore.PASSIVE_PUBLISH_INTERVAL_MILLIS].
+     * Текущие сутки и снимок меток — раз в [DataFileStore.PASSIVE_PUBLISH_INTERVAL_MILLIS].
      *
      * Плюс сутки запоздавших событий: геофенс или переход активности, доставленный
      * после полуночи, относится ко вчерашнему файлу, а вчерашние сутки уже закрыты.
@@ -144,14 +144,6 @@ class JournalPublisher @Inject constructor(
             LABEL_COLUMNS,
             labels,
         ) { label -> labelCells(label) }
-
-        val sessions = sessionDao.all()
-        writeAndPublish(
-            File(paths.journalStagingDir, SESSIONS_FILE),
-            paths.journalPublishedDir,
-            SESSION_COLUMNS,
-            sessions,
-        ) { session -> sessionCells(session) }
     }
 
     private fun labelCells(label: PassageLabel): List<String> = listOf(
@@ -166,17 +158,6 @@ class JournalPublisher @Inject constructor(
         label.suspicious.toString(),
         label.note.orEmpty(),
         label.confirmed.toString(),
-    )
-
-    private fun sessionCells(session: RecordingSession): List<String> = listOf(
-        session.id.toString(),
-        session.startedAt.toString(),
-        session.endedAt?.toString().orEmpty(),
-        session.label.name,
-        session.sensorManifest.orEmpty(),
-        session.fileDir.orEmpty(),
-        session.sizeBytes.toString(),
-        session.shared.toString(),
     )
 
     /**
@@ -222,7 +203,7 @@ class JournalPublisher @Inject constructor(
 
     /**
      * RFC 4180: поле в кавычках, если в нём запятая, кавычка или перевод строки;
-     * кавычки удваиваются. `payload_json` и `sensor_manifest` — JSON, там всё это есть.
+     * кавычки удваиваются. `payload_json` — JSON, там всё это есть.
      */
     private fun appendEscaped(line: StringBuilder, cell: String) {
         if (cell.isEmpty()) return
@@ -244,7 +225,6 @@ class JournalPublisher @Inject constructor(
 
         const val EVENTS_FILE = "events.csv.gz"
         const val LABELS_FILE = "labels.csv.gz"
-        const val SESSIONS_FILE = "sessions.csv.gz"
 
         /**
          * `receivedTime` ставится до асинхронной вставки в Room, так что событие
@@ -280,17 +260,6 @@ class JournalPublisher @Inject constructor(
             "suspicious",
             "note",
             "confirmed",
-        )
-
-        val SESSION_COLUMNS = listOf(
-            "id",
-            "started_at",
-            "ended_at",
-            "label",
-            "sensor_manifest",
-            "file_dir",
-            "size_bytes",
-            "shared",
         )
     }
 }

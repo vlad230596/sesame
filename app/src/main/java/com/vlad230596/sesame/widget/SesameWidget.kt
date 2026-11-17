@@ -48,7 +48,8 @@ import com.vlad230596.sesame.ui.theme.SesameBarrierAccents
 import kotlinx.coroutines.flow.first
 
 /**
- * Виджет на домашний экран (§4.2): шлагбаум A, шлагбаум B, интенсивная запись.
+ * Виджет на домашний экран (§4.2): шлагбаум A и шлагбаум B. Строки интенсивной
+ * записи больше нет — сама запись убрана из приложения.
  *
  * **Цвета берутся из схемы приложения, а не из системной палитры.** `GlanceTheme`
  * по умолчанию тянет динамические цвета Material You, и на домашнем экране
@@ -58,8 +59,7 @@ import kotlinx.coroutines.flow.first
  * [SesameBarrierAccents], что и в приложении, а `GlanceTheme` здесь не
  * используется вовсе.
  *
- * Раскладка повторяет макет виджета 4×2: строка состояния, две кнопки рядом,
- * узкая строка записи под ними. Рядом, а не одна под другой, потому что на
+ * Раскладка: строка состояния и две кнопки рядом под ней. Рядом, а не одна под другой, потому что на
  * домашнем экране виджет платит за каждую клетку высоты, а две цветные кнопки
  * различаются цветом и без вертикального порядка.
  *
@@ -70,24 +70,22 @@ class SesameWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // Читается один раз на обновление: виджет перерисовывается по команде
-        // (нажатие, смена настроек, старт записи), а не живёт на подписке —
+        // (нажатие, смена настроек), а не живёт на подписке —
         // подписка в фоне стоила бы процесса, который системе не нужен.
         val entryPoint = runCatching { widgetEntryPoint(context) }.getOrNull()
         val barriers = runCatching { entryPoint?.barriers()?.observeAll()?.first() }
             .getOrNull()
             .orEmpty()
-        val recording = runCatching { entryPoint?.sessions()?.observeActive()?.first() != null }
-            .getOrDefault(false)
         val lastEventAt = runCatching { entryPoint?.logEvents()?.observeLastReceivedTime()?.first() }
             .getOrNull()
 
         provideContent {
-            WidgetContent(barriers = barriers, recording = recording, lastEventAt = lastEventAt)
+            WidgetContent(barriers = barriers, lastEventAt = lastEventAt)
         }
     }
 
     @Composable
-    private fun WidgetContent(barriers: List<Barrier>, recording: Boolean, lastEventAt: Long?) {
+    private fun WidgetContent(barriers: List<Barrier>, lastEventAt: Long?) {
         val context = LocalContext.current
         val state = currentState<Preferences>()
         val pendingId = state[WidgetKeys.PendingBarrierId]
@@ -153,9 +151,6 @@ class SesameWidget : GlanceAppWidget() {
                     }
                 }
             }
-
-            Spacer(GlanceModifier.height(WidgetPalette.Gap))
-            RecordRow(recording = recording)
         }
     }
 
@@ -302,55 +297,10 @@ class SesameWidget : GlanceAppWidget() {
             }
         }
     }
-
-    /**
-     * Строка записи ведёт в приложение, на экран выбора метки сессии (§4.3):
-     * метка выбирается крупными кнопками, и в виджете для этого нет места.
-     * Во время записи она же показывает состояние и открывает главный экран
-     * с таймером сессии.
-     */
-    @Composable
-    private fun RecordRow(recording: Boolean) {
-        val context = LocalContext.current
-        Row(
-            modifier = GlanceModifier
-                .fillMaxWidth()
-                .height(WidgetPalette.RecordHeight)
-                .cornerRadius(WidgetPalette.RowCorner)
-                .background(WidgetPalette.Neutral)
-                .clickable(
-                    actionStartActivity(
-                        if (recording) openAppIntent(context) else startSessionIntent(context),
-                    ),
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
-        ) {
-            Box(
-                modifier = GlanceModifier
-                    .size(10.dp)
-                    .cornerRadius(5.dp)
-                    .background(WidgetPalette.Record),
-            ) {}
-            Spacer(GlanceModifier.width(9.dp))
-            Text(
-                text = if (recording) "Идёт запись" else "Интенсивная запись",
-                style = TextStyle(
-                    color = WidgetPalette.OnNeutral,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
-                ),
-                maxLines = 1,
-            )
-        }
-    }
 }
 
 private fun openAppIntent(context: Context): Intent =
     Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-private fun startSessionIntent(context: Context): Intent =
-    openAppIntent(context).setAction(MainActivity.ACTION_START_SESSION)
 
 /**
  * Хром виджета. Смысловые цвета кнопок сюда не переезжают — они берутся из
@@ -374,13 +324,9 @@ private object WidgetPalette {
     /** «Сбор жив» — зелёная точка, как в шапке приложения. */
     val Live = ColorProvider(Color(0xFF5ED39A))
 
-    /** «Идёт запись» — коралловая точка, как в приложении. */
-    val Record = ColorProvider(Color(0xFFFF6B5E))
-
     val OuterCorner = 26.dp
     val Corner = 20.dp
     val RowCorner = 16.dp
     val Pad = 14.dp
     val Gap = 10.dp
-    val RecordHeight = 48.dp
 }

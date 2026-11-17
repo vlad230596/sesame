@@ -14,31 +14,24 @@ import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Куда пишется отсчёт: в пассивный слой суток (§4.4) или в файлы сессии (§4.3). */
-enum class WriteScope { PASSIVE, SESSION }
+/**
+ * Куда пишется отсчёт. Остался один пассивный слой суток (§4.4): интенсивная
+ * запись убрана, но параметр в API записи сохранён, чтобы не трогать всех
+ * пишущих разом.
+ */
+enum class WriteScope { PASSIVE }
 
 /** Заготовка манифеста: постоянная часть и часть, относящаяся к текущему запуску. */
 class ManifestDraft(val topLevel: JSONObject, val run: JSONObject)
-
-/** Что получилось из сессии — идёт в `RecordingSession` (§5). */
-data class SessionFiles(
-    val sessionId: Long,
-    val publishedDir: String,
-    val sizeBytes: Long,
-    val manifestJson: String,
-    val streamKeys: List<String>,
-    val publishedFiles: Int,
-)
 
 /**
  * Файловый слой сбора (§5, §6, §9).
  *
  * Единственный поток записи с очередью: потоки датчиков и UI не блокируются, а
- * порядок операций гарантирован самой очередью — именно поэтому сброс кольцевого
- * буфера (§4.3) заведомо попадает в файл сессии раньше живых отсчётов, без
- * блокировок и без дополнительной синхронизации.
+ * порядок операций гарантирован самой очередью, без блокировок и без
+ * дополнительной синхронизации.
  *
- * Всё состояние — открытые файлы, кольцевой буфер, манифесты — трогается только
+ * Всё состояние — открытые файлы и манифесты — трогается только
  * из потока записи. Публичные методы лишь кладут задачи в очередь.
  */
 @Singleton
@@ -54,7 +47,6 @@ class DataFileStore @Inject constructor(
     private sealed interface Task
 
     private class SensorTask(
-        val scope: WriteScope,
         val key: String,
         val nanos: Long,
         val values: FloatArray,
@@ -63,13 +55,10 @@ class DataFileStore @Inject constructor(
     ) : Task
 
     private class RowTask(
-        val scope: WriteScope,
         val key: String,
         val nanos: Long,
         val cells: Array<String>,
     ) : Task
-
-    private class ActionTask(val block: () -> Unit) : Task
 
     private val queue = LinkedBlockingQueue<Task>(QUEUE_CAPACITY)
     private val droppedSamples = AtomicLong()
@@ -122,28 +111,9 @@ class DataFileStore @Inject constructor(
         val writers = LinkedHashMap<String, GzipCsvWriter>()
     }
 
-    private class RingEntry(
-        val key: String,
-        val nanos: Long,
-        val values: FloatArray?,
-        val count: Int,
-        val accuracy: Int,
-        val cells: Array<String>?,
-    )
-
     private var passive: Target? = null
     private var passiveDate: LocalDate? = null
     private var passiveDayEndMillis: Long = Long.MAX_VALUE
-    private var session: Target? = null
-    private var sessionId: Long = 0L
-
-    /**
-     * Кольцевой буфер пассивного слоя (§4.3): последние [RING_BUFFER_SECONDS]
-     * секунд отсчётов одной хронологической очередью — так сброс в файл сессии
-     * сохраняет порядок событий между датчиками, а обрезка окна стоит один
-     * взгляд на голову очереди.
-     */
-    private val ring = ArrayDeque<RingEntry>()
 
     private var lastFlushAt = 0L
     private var lastPassivePublishAt = 0L
@@ -175,7 +145,7 @@ class DataFileStore @Inject constructor(
     fun shutdown(awaitMillis: Long = DEFAULT_SHUTDOWN_AWAIT_MILLIS) {
         val thread = writerThread ?: return
         running = false
-        // Поток не прерываем: он может копировать сессию в Documents/Sesame/, и
+        // Поток не прерываем: он может копировать сутки в Documents/Sesame/, и
         // InterruptedIOException посреди копирования оставил бы половину файла.
         // Цикл сам заметит флаг в пределах POLL_MILLIS.
         runCatching { thread.join(awaitMillis) }
@@ -208,6 +178,8 @@ class DataFileStore @Inject constructor(
 
     // --- запись --------------------------------------------------------------------
 
+    // [WriteScope] теперь один, параметр оставлен ради совместимости вызовов.
+    @Suppress("UNUSED_PARAMETER")
     fun writeSensor(
         scope: WriteScope,
         key: String,
@@ -218,16 +190,17 @@ class DataFileStore @Inject constructor(
     ) {
         val count = valueCount.coerceIn(0, values.size)
         // SensorEvent.values переиспользуется системой — копия обязательна.
-        submit(SensorTask(scope, key, elapsedRealtimeNanos, values.copyOf(count), count, accuracy))
+        submit(SensorTask(key, elapsedRealtimeNanos, values.copyOf(count), count, accuracy))
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun writeRow(
         scope: WriteScope,
         key: String,
         elapsedRealtimeNanos: Long,
         cells: Array<String>,
     ) {
-        submit(RowTask(scope, key, elapsedRealtimeNanos, cells))
+        submit(RowTask(key, elapsedRealtimeNanos, cells))
     }
 
     private fun submit(task: Task) {
@@ -236,83 +209,6 @@ class DataFileStore @Inject constructor(
             return
         }
         if (!queue.offer(task)) droppedSamples.incrementAndGet()
-    }
-
-    /** Действие в потоке записи: сохраняет порядок относительно потока отсчётов. */
-    private fun post(block: () -> Unit): Boolean {
-        if (!running) return false
-        val accepted = queue.offer(ActionTask(block))
-        if (!accepted) Log.w(TAG, "Очередь записи переполнена, действие потеряно")
-        return accepted
-    }
-
-    // --- сессия --------------------------------------------------------------------
-
-    fun openSession(id: Long, draft: ManifestDraft) {
-        post {
-            if (session != null) closeSessionInternal(null, null)
-            sessionId = id
-            session = openTarget(
-                stagingDir = paths.sessionStagingDir(id),
-                publishedDir = paths.sessionPublishedDir(id),
-                manifestName = Manifests.SESSION_FILE,
-                draft = draft,
-            )
-        }
-    }
-
-    /**
-     * §4.3: при старте интенсивной сессии кольцевой буфер пассивного слоя
-     * сбрасывается в файл сессии первым. «Нажал запись, уже сидя в машине» не
-     * должно терять момент посадки.
-     */
-    fun dumpRingBufferIntoSession() {
-        post {
-            val target = session ?: return@post
-            if (ring.isEmpty()) {
-                target.run.put("prehistory", JSONObject().put("rows", 0))
-                return@post
-            }
-            val perStream = JSONObject()
-            var rows = 0L
-            var fromNanos = Long.MAX_VALUE
-            var untilNanos = Long.MIN_VALUE
-            ring.forEach { entry ->
-                val writer = writerFor(target, entry.key)
-                if (entry.values != null) {
-                    writer.appendSensorValues(entry.nanos, entry.values, entry.count, entry.accuracy)
-                } else if (entry.cells != null) {
-                    writer.appendCells(entry.nanos, entry.cells)
-                }
-                rows++
-                fromNanos = minOf(fromNanos, entry.nanos)
-                untilNanos = maxOf(untilNanos, entry.nanos)
-                perStream.put(entry.key, perStream.optLong(entry.key, 0L) + 1L)
-            }
-            // Границу предыстории пишем в манифест: оффлайн она нужна, чтобы отделить
-            // 5 Гц из буфера от 500 Гц живой записи в том же файле.
-            target.run.put(
-                "prehistory",
-                JSONObject().apply {
-                    put("windowSeconds", RING_BUFFER_SECONDS)
-                    put("rows", rows)
-                    put("fromElapsedRealtimeNanos", fromNanos)
-                    put("untilElapsedRealtimeNanos", untilNanos)
-                    put("rowsByStream", perStream)
-                },
-            )
-        }
-    }
-
-    /**
-     * Закрывает файлы сессии, дописывает `session.json` и публикует каталог (§6, §7).
-     *
-     * [onClosed] вызывается всегда — в том числе когда поток записи уже не жив:
-     * иначе строка сессии в Room осталась бы навсегда незакрытой, и главный
-     * экран показывал бы идущую запись при мёртвом сборе.
-     */
-    fun closeSession(extras: JSONObject?, onClosed: (SessionFiles?) -> Unit) {
-        if (!post { closeSessionInternal(extras, onClosed) }) onClosed(null)
     }
 
     // --- поток записи --------------------------------------------------------------
@@ -342,7 +238,6 @@ class DataFileStore @Inject constructor(
             Log.e(TAG, "Поток записи упал", error)
         } finally {
             // Файлы закрываются при любом завершении, включая падение.
-            runCatching { closeSessionInternal(null, null) }
             runCatching { closePassiveInternal(publish = true) }
             runCatching { heartbeat.persistNow() }
             Log.i(TAG, "Поток записи остановлен, потеряно отсчётов: ${droppedSamples.get()}")
@@ -351,27 +246,12 @@ class DataFileStore @Inject constructor(
 
     private fun handle(task: Task) {
         when (task) {
-            is ActionTask -> runCatching { task.block() }
-                .onFailure { Log.w(TAG, "Действие потока записи упало", it) }
-
             is SensorTask -> {
                 sawDataSinceTick = true
                 runCatching {
-                    when (task.scope) {
-                        WriteScope.PASSIVE -> {
-                            ensurePassive()?.let {
-                                writerFor(it, task.key)
-                                    .appendSensorValues(task.nanos, task.values, task.count, task.accuracy)
-                            }
-                            remember(
-                                RingEntry(task.key, task.nanos, task.values, task.count, task.accuracy, null),
-                            )
-                        }
-
-                        WriteScope.SESSION -> session?.let {
-                            writerFor(it, task.key)
-                                .appendSensorValues(task.nanos, task.values, task.count, task.accuracy)
-                        }
+                    ensurePassive()?.let {
+                        writerFor(it, task.key)
+                            .appendSensorValues(task.nanos, task.values, task.count, task.accuracy)
                     }
                 }.onFailure { Log.w(TAG, "Не удалось записать отсчёт ${task.key}", it) }
             }
@@ -379,17 +259,8 @@ class DataFileStore @Inject constructor(
             is RowTask -> {
                 sawDataSinceTick = true
                 runCatching {
-                    when (task.scope) {
-                        WriteScope.PASSIVE -> {
-                            ensurePassive()?.let {
-                                writerFor(it, task.key).appendCells(task.nanos, task.cells)
-                            }
-                            remember(RingEntry(task.key, task.nanos, null, 0, 0, task.cells))
-                        }
-
-                        WriteScope.SESSION -> session?.let {
-                            writerFor(it, task.key).appendCells(task.nanos, task.cells)
-                        }
+                    ensurePassive()?.let {
+                        writerFor(it, task.key).appendCells(task.nanos, task.cells)
                     }
                 }.onFailure { Log.w(TAG, "Не удалось записать строку ${task.key}", it) }
             }
@@ -418,17 +289,6 @@ class DataFileStore @Inject constructor(
 
     private fun flushAll() {
         passive?.writers?.values?.forEach { runCatching { it.flush() } }
-        session?.writers?.values?.forEach { runCatching { it.flush() } }
-    }
-
-    private fun remember(entry: RingEntry) {
-        ring.addLast(entry)
-        val newest = entry.nanos
-        while (ring.isNotEmpty() &&
-            (newest - ring.first().nanos > RING_BUFFER_NANOS || ring.size > RING_BUFFER_MAX_ENTRIES)
-        ) {
-            ring.removeFirst()
-        }
     }
 
     // --- цели записи ---------------------------------------------------------------
@@ -551,40 +411,6 @@ class DataFileStore @Inject constructor(
         publisher.publishDirectory(target.stagingDir, target.publishedDir)
     }
 
-    private fun closeSessionInternal(extras: JSONObject?, onClosed: ((SessionFiles?) -> Unit)?) {
-        val target = session
-        if (target == null) {
-            onClosed?.invoke(null)
-            return
-        }
-        session = null
-        val id = sessionId
-        sessionId = 0L
-
-        extras?.keys()?.forEach { key -> target.run.put(key, extras.get(key)) }
-        target.run.put("closedAtMillis", System.currentTimeMillis())
-        target.writers.values.forEach { runCatching { it.close() } }
-        writeManifest(target)
-
-        val published = publisher.publishDirectory(target.stagingDir, target.publishedDir)
-        val sizeBytes = target.stagingDir.listFiles()
-            ?.filter { it.isFile }
-            ?.sumOf { it.length() }
-            ?: 0L
-        discardStagingIfPublished(target.stagingDir, published)
-
-        onClosed?.invoke(
-            SessionFiles(
-                sessionId = id,
-                publishedDir = target.publishedDir,
-                sizeBytes = sizeBytes,
-                manifestJson = target.manifest.toString(),
-                streamKeys = target.writers.keys.toList(),
-                publishedFiles = published,
-            ),
-        )
-    }
-
     /**
      * Staging — временная площадка, а не второй экземпляр датасета: как только
      * все файлы каталога легли в `Documents/Sesame/`, копия удаляется. Иначе
@@ -609,16 +435,6 @@ class DataFileStore @Inject constructor(
     companion object {
         private const val TAG = "DataFileStore"
         private const val THREAD_NAME = "sesame-writer"
-
-        /** §4.3: 60 секунд предыстории. */
-        const val RING_BUFFER_SECONDS: Int = 60
-        private const val RING_BUFFER_NANOS: Long = RING_BUFFER_SECONDS * 1_000_000_000L
-
-        /**
-         * Страховка от роста памяти, если пассивные частоты выкрутят в настройках:
-         * 60 с при разумных частотах — это сотни записей, а не десятки тысяч.
-         */
-        private const val RING_BUFFER_MAX_ENTRIES = 40_000
 
         /** §7: текущие сутки публикуются, не дожидаясь полуночи. */
         const val PASSIVE_PUBLISH_INTERVAL_MILLIS = 15 * 60_000L

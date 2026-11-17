@@ -1,8 +1,6 @@
 package com.vlad230596.sesame.ui.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
@@ -34,13 +31,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,15 +47,12 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.vlad230596.sesame.data.SessionLabel
 import com.vlad230596.sesame.data.entity.Barrier
-import com.vlad230596.sesame.data.entity.PassageLabel
 import com.vlad230596.sesame.data.prefs.SesameSettings
 import com.vlad230596.sesame.ui.car.CarUiState
 import com.vlad230596.sesame.ui.car.CarViewModel
 import com.vlad230596.sesame.ui.common.AccentStrip
 import com.vlad230596.sesame.ui.common.CardHeadRow
-import com.vlad230596.sesame.ui.common.SESSION_LABEL_CHOICES
 import com.vlad230596.sesame.ui.common.SesameCard
 import com.vlad230596.sesame.ui.common.SesameIcons
 import com.vlad230596.sesame.ui.common.SesameSurface
@@ -69,10 +61,8 @@ import com.vlad230596.sesame.ui.common.SubScreenScaffold
 import com.vlad230596.sesame.ui.common.ThinProgress
 import com.vlad230596.sesame.ui.common.formatAgoShort
 import com.vlad230596.sesame.ui.common.formatBytes
-import com.vlad230596.sesame.ui.common.formatDuration
 import com.vlad230596.sesame.ui.common.maskPhone
 import com.vlad230596.sesame.ui.common.plural
-import com.vlad230596.sesame.ui.common.title
 import com.vlad230596.sesame.ui.permissions.PermissionsScreen
 import com.vlad230596.sesame.ui.theme.BarrierAccent
 import com.vlad230596.sesame.ui.theme.Dimens
@@ -91,15 +81,13 @@ import com.vlad230596.sesame.ui.theme.SesameTheme
  * то, во что попадают.
  *
  * Второе решение: **на главной только то, чем пользуются каждый день** — две
- * кнопки шлагбаумов и «Где машина». Интенсивная запись и разбор меток ушли с
- * экрана: ими давно не пользуются. Запись по-прежнему запускается с виджета, а
- * метки правятся в «Истории».
+ * кнопки шлагбаумов и «Где машина». Интенсивной записи больше нет вовсе, а
+ * журнал проездов спрятан в настройки: размечать его не обязательно, и ничто на
+ * главной к этому не подталкивает.
  */
 @Composable
 fun HomeScreen(
     modifier: Modifier = Modifier,
-    startSessionRequest: Int = 0,
-    onStartSessionHandled: () -> Unit = {},
     onOpenCar: () -> Unit = {},
 ) {
     val viewModel: HomeViewModel = hiltViewModel()
@@ -116,13 +104,8 @@ fun HomeScreen(
 
     HomeContent(
         state = state,
-        startSessionRequest = startSessionRequest,
-        onStartSessionHandled = onStartSessionHandled,
         onBarrierPressed = viewModel::onBarrierPressed,
         onCancelCountdown = viewModel::cancelCountdown,
-        onStartSession = viewModel::startSession,
-        onExtendSession = viewModel::extendSession,
-        onStopSession = viewModel::stopSession,
         onStartService = viewModel::startService,
         onStopService = viewModel::stopService,
         onMessageShown = viewModel::dismissMessage,
@@ -146,30 +129,15 @@ private fun HomeContent(
     state: HomeUiState,
     onBarrierPressed: (Barrier) -> Unit,
     onCancelCountdown: () -> Unit,
-    onStartSession: (SessionLabel) -> Unit,
-    onExtendSession: () -> Unit,
-    onStopSession: () -> Unit,
     onStartService: () -> Unit,
     onStopService: () -> Unit,
     onMessageShown: () -> Unit,
     modifier: Modifier = Modifier,
-    startSessionRequest: Int = 0,
-    onStartSessionHandled: () -> Unit = {},
     carLine: String? = null,
     onOpenCar: () -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
-    var labelPickerVisible by remember { mutableStateOf(false) }
     var permissionsVisible by remember { mutableStateOf(false) }
-
-    // §4.2: кнопка записи в виджете открывает экран выбора метки сессии. Если
-    // сессия уже идёт, открывать нечего — вторую запускать нельзя, и на экране
-    // и так виден её таймер.
-    LaunchedEffect(startSessionRequest, state.session != null) {
-        if (startSessionRequest <= 0) return@LaunchedEffect
-        if (state.session == null) labelPickerVisible = true
-        onStartSessionHandled()
-    }
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
@@ -182,9 +150,8 @@ private fun HomeContent(
 
             HomeHeader(lastEventAt = state.lastEventAt, now = state.now)
 
-            // Верхняя половина — то, что читают. Прокручивается: карточка идущей
-            // сессии (её запускает виджет) вместе с кнопками в 844 dp не всегда
-            // помещается.
+            // Верхняя половина — то, что читают. Прокручивается: на маленьком
+            // экране плашка разрешений вместе с кнопками может не поместиться.
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -201,19 +168,6 @@ private fun HomeContent(
                         containerColor = Palette.RecordSurface,
                         borderColor = Palette.RecordBorder,
                         onClick = { permissionsVisible = true },
-                    )
-                }
-
-                val session = state.session
-                if (session != null) {
-                    SessionCard(
-                        label = session.label,
-                        elapsedMillis = state.now - session.startedAt,
-                        remainingMillis = session.plannedEndAt - state.now,
-                        totalMillis = (session.plannedEndAt - session.startedAt).coerceAtLeast(1),
-                        extendMinutes = state.settings.recordingDurationMinutes,
-                        onExtend = onExtendSession,
-                        onStop = onStopSession,
                     )
                 }
 
@@ -257,7 +211,6 @@ private fun HomeContent(
                         position = index,
                         accent = SesameAccentColors.current.barrier(index),
                         immediate = state.settings.cancelTimeoutSeconds == 0,
-                        compact = state.session != null,
                         onClick = { onBarrierPressed(barrier) },
                     )
                 }
@@ -280,31 +233,6 @@ private fun HomeContent(
             barrier = state.barriers.firstOrNull { it.id == countdown.barrierId },
             accent = SesameAccentColors.current.barrier(index),
             onCancel = onCancelCountdown,
-        )
-    }
-
-    if (labelPickerVisible) {
-        SessionLabelDialog(
-            onPick = { label ->
-                labelPickerVisible = false
-                onStartSession(label)
-            },
-            onDismiss = {
-                // Закрытие окна — это отмена, и ничего больше.
-                //
-                // §4.3 говорит «тап по любой другой области запускает запись без
-                // метки», и буквально так и было сделано. На устройстве это
-                // оказалось ловушкой: и тап мимо окна, и кнопка «Назад» — в
-                // Android универсальные жесты отмены, а здесь они запускали
-                // пятнадцатиминутную сессию. Запустить запись случайно легко,
-                // заметить это — нет.
-                //
-                // Намерение §4.3 («не заставлять выбирать метку») закрыто явной
-                // кнопкой «Начать без метки» внутри окна. Подпись в окне говорит
-                // ровно то, что происходит, — макет на этот счёт написан до того,
-                // как баг нашёлся, и его текст здесь не повторяется.
-                labelPickerVisible = false
-            },
         )
     }
 
@@ -372,7 +300,7 @@ private fun liveColor(lastEventAt: Long?, now: Long): Color = when {
  * «Где машина: у Ш2, 3 ч назад» (§4.1). Одна строка, а не карта: ответ словами
  * чаще всего достаточен, карта — по тапу.
  *
- * Строка высотой с прежнюю «Интенсивную запись» и с контуром, как у всего, что
+ * Строка высотой с прежнюю кнопку записи и с контуром, как у всего, что
  * нажимают: это ежедневное действие, но не открытие — заливки у неё нет.
  */
 @Composable
@@ -484,7 +412,6 @@ private fun BarrierButton(
     position: Int,
     accent: BarrierAccent,
     immediate: Boolean,
-    compact: Boolean,
     onClick: () -> Unit,
 ) {
     val subtitle = buildString {
@@ -501,7 +428,7 @@ private fun BarrierButton(
     SesameSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (compact) Dimens.BarrierButtonHeightCompact else Dimens.BarrierButtonHeight),
+            .height(Dimens.BarrierButtonHeight),
         color = accent.container,
         borderWidth = 0.dp,
         borderColor = Color.Transparent,
@@ -520,9 +447,7 @@ private fun BarrierButton(
                 imageVector = SesameIcons.BoomGate,
                 contentDescription = null,
                 tint = accent.onContainer,
-                modifier = Modifier.size(
-                    if (compact) Dimens.BarrierIconSmall else Dimens.BarrierIcon,
-                ),
+                modifier = Modifier.size(Dimens.BarrierIcon),
             )
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 // Имя ужимается шрифтом, а не обрезается. С обычным Text и
@@ -531,21 +456,15 @@ private fun BarrierButton(
                 // оставалось одно «Шлагбаум».
                 FittedName(
                     text = barrier.displayName,
-                    style = if (compact) {
-                        SesameText.BarrierName.copy(fontSize = 24.sp)
-                    } else {
-                        SesameText.BarrierName
-                    },
+                    style = SesameText.BarrierName,
                     color = accent.onContainer,
                 )
-                if (!compact) {
-                    Text(
-                        text = subtitle,
-                        style = SesameText.BarrierSub,
-                        color = accent.onContainerMuted,
-                        maxLines = 1,
-                    )
-                }
+                Text(
+                    text = subtitle,
+                    style = SesameText.BarrierSub,
+                    color = accent.onContainerMuted,
+                    maxLines = 1,
+                )
             }
         }
     }
@@ -569,95 +488,6 @@ private fun FittedName(text: String, style: TextStyle, color: Color) {
             stepSize = 1.sp,
         ),
     )
-}
-
-/** Карточка идущей сессии: сколько осталось, «Продлить» и «Стоп» (§4.3). */
-@Composable
-private fun SessionCard(
-    label: SessionLabel,
-    elapsedMillis: Long,
-    remainingMillis: Long,
-    totalMillis: Long,
-    extendMinutes: Int,
-    onExtend: () -> Unit,
-    onStop: () -> Unit,
-) {
-    SesameCard(
-        color = Palette.RecordSurface,
-        borderColor = Palette.RecordBorder,
-        corner = Dimens.ButtonCorner,
-        horizontalPadding = 18.dp,
-        verticalPadding = 18.dp,
-        gap = 14.dp,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            StatusDot(Palette.Record, Dimens.DotLarge)
-            Text(
-                "Запись идёт",
-                style = SesameText.RowTitle.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold),
-                color = Palette.TextPrimary,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = label.title(),
-                style = SesameText.Caption.copy(fontWeight = FontWeight.SemiBold),
-                color = Palette.RecordChipText,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Palette.RecordChip)
-                    .padding(horizontal = 11.dp, vertical = 5.dp),
-            )
-        }
-
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                text = formatDuration(remainingMillis.coerceAtLeast(0)),
-                style = SesameText.MonoTimer,
-                color = Palette.TextPrimary,
-            )
-            Text(
-                text = "осталось из ${formatDuration(totalMillis)}",
-                style = SesameText.BarrierSub.copy(fontWeight = FontWeight.Normal),
-                color = Palette.RecordMuted,
-                modifier = Modifier.padding(bottom = 6.dp),
-            )
-        }
-
-        ThinProgress(
-            progress = elapsedMillis.toFloat() / totalMillis,
-            color = Palette.Record,
-            trackColor = Palette.RecordChip,
-            thickness = Dimens.ProgressThick,
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            FlatButton(
-                text = "Продлить +$extendMinutes мин",
-                modifier = Modifier.weight(1f),
-                container = Color.Transparent,
-                content = Palette.RecordOutlineText,
-                border = Palette.RecordOutline,
-                onClick = onExtend,
-            )
-            FlatButton(
-                text = "Стоп",
-                modifier = Modifier.weight(1f),
-                container = Palette.Record,
-                content = Palette.OnRecord,
-                onClick = onStop,
-            )
-        }
-
-        Text(
-            "Первые 60 с взяты из кольцевого буфера — момент посадки не потерян.",
-            style = SesameText.Caption.copy(fontSize = 12.sp),
-            color = Palette.RecordDim,
-        )
-    }
 }
 
 /** Прямоугольная кнопка макета: заливка или контур, без теней и пилюль Material. */
@@ -815,111 +645,6 @@ private fun CountdownRing(progress: Float, seconds: Int, accent: Color) {
     }
 }
 
-/**
- * Выбор метки сессии (§4.3): четыре крупные плитки два на два.
- *
- * Окно перекрывает экран почти целиком, но не до краёв: тап по полю вокруг —
- * отмена, как и «Назад». Записать пятнадцать минут случайно нельзя.
- */
-@Composable
-private fun SessionLabelDialog(onPick: (SessionLabel) -> Unit, onDismiss: () -> Unit) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Palette.Background.copy(alpha = 0.97f))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Dimens.ScreenPadding)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {},
-                    ),
-                verticalArrangement = Arrangement.spacedBy(Dimens.SpaceS),
-            ) {
-                Text("Метка сессии", style = SesameText.DialogTitle, color = Palette.TextPrimary)
-                Text(
-                    "Выберите, что происходит, — или начните без метки: её можно " +
-                        "проставить позже в истории. Закрыть окно значит не начинать запись.",
-                    style = SesameText.Body,
-                    color = Palette.TextMuted,
-                )
-                Spacer(Modifier.height(Dimens.SpaceS))
-
-                SESSION_LABEL_CHOICES.chunked(2).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        row.forEach { label ->
-                            LabelTile(
-                                label = label,
-                                modifier = Modifier.weight(1f),
-                                onClick = { onPick(label) },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(2.dp))
-                }
-
-                Spacer(Modifier.height(Dimens.SpaceS))
-                FlatButton(
-                    text = "Начать без метки",
-                    modifier = Modifier.fillMaxWidth(),
-                    container = Color.Transparent,
-                    content = Palette.TextMuted,
-                    border = Palette.BorderStrong,
-                    height = 60.dp,
-                    corner = Dimens.RowCorner,
-                    onClick = { onPick(SessionLabel.NONE) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LabelTile(label: SessionLabel, modifier: Modifier, onClick: () -> Unit) {
-    val (icon, tint) = labelIcon(label)
-    SesameSurface(
-        modifier = modifier.height(Dimens.LabelTileHeight),
-        color = Palette.Surface,
-        borderColor = Palette.BorderStrong,
-        borderWidth = Dimens.BorderWidth,
-        corner = Dimens.ButtonCorner,
-        onClick = onClick,
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(18.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(30.dp))
-            Text(label.title(), style = SesameText.TileTitle, color = Palette.TextPrimary)
-        }
-    }
-}
-
-/**
- * Цвет иконки метки повторяет смысл направления: «домой» янтарный, «из дома»
- * бирюзовый — та же пара, что у шлагбаумов, и то же «туда/обратно».
- */
-private fun labelIcon(label: SessionLabel): Pair<ImageVector, Color> = when (label) {
-    SessionLabel.GOING_HOME -> SesameIcons.HouseIn to Palette.Amber
-    SessionLabel.LEAVING_HOME -> SesameIcons.HouseOut to Palette.Teal
-    SessionLabel.ON_FOOT -> SesameIcons.Walk to Color(0xFFB9C0CA)
-    SessionLabel.OTHER -> SesameIcons.Question to Color(0xFFB9C0CA)
-    SessionLabel.NONE -> SesameIcons.Question to Palette.TextMuted
-}
-
 private val previewBarriers = listOf(
     Barrier(
         id = 1,
@@ -946,59 +671,16 @@ private fun HomePreview() {
         HomeContent(
             state = HomeUiState(
                 barriers = previewBarriers,
-                unconfirmed = listOf(
-                    PassageLabel(
-                        id = 5,
-                        timestamp = System.currentTimeMillis() - 400_000,
-                        barrierId = 1,
-                        source = com.vlad230596.sesame.data.LabelSource.WIDGET,
-                        outcome = com.vlad230596.sesame.data.CallOutcome.CALLED,
-                    ),
-                ),
                 lastEventAt = System.currentTimeMillis() - 4 * 60_000,
                 usedBytes = 2_400_000_000,
                 serviceRunning = true,
             ),
             onBarrierPressed = {},
             onCancelCountdown = {},
-            onStartSession = {},
-            onExtendSession = {},
-            onStopSession = {},
             onStartService = {},
             onStopService = {},
             onMessageShown = {},
             carLine = "у Ш2, 3 ч назад",
-        )
-    }
-}
-
-@Preview(showBackground = true, widthDp = 390, heightDp = 844)
-@Composable
-private fun HomeRecordingPreview() {
-    val now = System.currentTimeMillis()
-    SesameTheme {
-        HomeContent(
-            state = HomeUiState(
-                barriers = previewBarriers,
-                session = com.vlad230596.sesame.session.ActiveSession(
-                    id = 1,
-                    label = SessionLabel.GOING_HOME,
-                    startedAt = now - 4 * 60_000,
-                    plannedEndAt = now + 11 * 60_000,
-                ),
-                lastEventAt = now,
-                usedBytes = 2_400_000_000,
-                serviceRunning = true,
-                now = now,
-            ),
-            onBarrierPressed = {},
-            onCancelCountdown = {},
-            onStartSession = {},
-            onExtendSession = {},
-            onStopSession = {},
-            onStartService = {},
-            onStopService = {},
-            onMessageShown = {},
         )
     }
 }
@@ -1013,13 +695,5 @@ private fun CountdownPreview() {
             accent = com.vlad230596.sesame.ui.theme.SesameBarrierAccents.barrier(0),
             onCancel = {},
         )
-    }
-}
-
-@Preview(showBackground = true, widthDp = 390, heightDp = 844)
-@Composable
-private fun SessionLabelDialogPreview() {
-    SesameTheme {
-        SessionLabelDialog(onPick = {}, onDismiss = {})
     }
 }

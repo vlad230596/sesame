@@ -39,6 +39,8 @@ fun SubScreenScaffold(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Кнопки справа в шапке — как у [TabHeader]. */
+    actions: @Composable () -> Unit = {},
     content: @Composable (Modifier) -> Unit,
 ) {
     Column(modifier = modifier.fillMaxSize().background(Palette.Background)) {
@@ -64,7 +66,9 @@ fun SubScreenScaffold(
                 color = Palette.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+            actions()
         }
         content(Modifier.padding(horizontal = Dimens.ScreenPadding))
     }
