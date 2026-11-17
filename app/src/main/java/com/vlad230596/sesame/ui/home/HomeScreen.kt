@@ -64,6 +64,8 @@ import com.vlad230596.sesame.ui.common.formatBytes
 import com.vlad230596.sesame.ui.common.maskPhone
 import com.vlad230596.sesame.ui.common.plural
 import com.vlad230596.sesame.ui.permissions.PermissionsScreen
+import com.vlad230596.sesame.ui.habits.HabitSuggestionsCard
+import com.vlad230596.sesame.ui.habits.HabitsViewModel
 import com.vlad230596.sesame.ui.theme.BarrierAccent
 import com.vlad230596.sesame.ui.theme.Dimens
 import com.vlad230596.sesame.ui.theme.Palette
@@ -96,9 +98,12 @@ fun HomeScreen(
     // главной и карточка на карте не разойдутся.
     val carViewModel: CarViewModel = hiltViewModel()
     val carState by carViewModel.state.collectAsStateWithLifecycle()
+    val habitsViewModel: HabitsViewModel = hiltViewModel()
+    val habitsState by habitsViewModel.state.collectAsStateWithLifecycle()
 
     LifecycleResumeEffect(Unit) {
         viewModel.refresh()
+        habitsViewModel.refreshClock()
         onPauseOrDispose { }
     }
 
@@ -112,6 +117,12 @@ fun HomeScreen(
         modifier = modifier,
         carLine = carLine(carState),
         onOpenCar = onOpenCar,
+        habits = {
+            HabitSuggestionsCard(
+                suggestions = habitsState.suggestions,
+                onRoute = { habitsViewModel.openRoute(it.habit, it.startsInMinutes) },
+            )
+        },
     )
 }
 
@@ -135,6 +146,7 @@ private fun HomeContent(
     modifier: Modifier = Modifier,
     carLine: String? = null,
     onOpenCar: () -> Unit = {},
+    habits: @Composable () -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var permissionsVisible by remember { mutableStateOf(false) }
@@ -176,6 +188,9 @@ private fun HomeContent(
                     onStartService = onStartService,
                     onStopService = onStopService,
                 )
+
+                // Привычки (habits/): «Маршрут» в свои дни и часы, только по кнопке.
+                habits()
 
                 Spacer(Modifier.height(Dimens.SpaceS))
             }

@@ -114,6 +114,9 @@ enum class LogEventType {
      */
     LOCATION_MODE,
 
+    /** Нажата кнопка «Маршрут» привычки на главной (habits/). */
+    HABIT_ROUTE_OPENED,
+
     /** Машину отключили — точка парковки; и смена «во дворе / за двором». */
     CAR_PARKED,
     CAR_PLACE_CHANGED,

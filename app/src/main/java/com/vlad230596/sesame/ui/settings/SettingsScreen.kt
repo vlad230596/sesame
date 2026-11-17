@@ -59,6 +59,9 @@ import com.vlad230596.sesame.ui.common.Tones
 import com.vlad230596.sesame.ui.common.formatBytes
 import com.vlad230596.sesame.ui.common.maskPhone
 import com.vlad230596.sesame.ui.history.HistoryScreen
+import com.vlad230596.sesame.ui.habits.HabitEditContent
+import com.vlad230596.sesame.ui.habits.HabitsListContent
+import com.vlad230596.sesame.ui.habits.HabitsViewModel
 import com.vlad230596.sesame.ui.permissions.PermissionsScreen
 import com.vlad230596.sesame.ui.theme.Dimens
 import com.vlad230596.sesame.ui.theme.Palette
@@ -73,6 +76,10 @@ private sealed interface SettingsRoute {
     data object Permissions : SettingsRoute
     data object Home : SettingsRoute
     data object Journal : SettingsRoute
+    data object Habits : SettingsRoute
+
+    /** Правка привычки; `null` — новая. После пересоздания экрана — назад к списку. */
+    data class HabitEdit(val habitId: String?) : SettingsRoute
     data class BarrierEdit(val barrierId: Long) : SettingsRoute
 }
 
@@ -106,6 +113,7 @@ fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
                     SettingsRoute.Permissions -> -2L
                     SettingsRoute.Home -> -3L
                     SettingsRoute.Journal -> -4L
+                    SettingsRoute.Habits, is SettingsRoute.HabitEdit -> -5L
                     is SettingsRoute.BarrierEdit -> it.barrierId
                 }
             },
@@ -116,6 +124,7 @@ fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
                     -2L -> SettingsRoute.Permissions
                     -3L -> SettingsRoute.Home
                     -4L -> SettingsRoute.Journal
+                    -5L -> SettingsRoute.Habits
                     else -> SettingsRoute.BarrierEdit(it)
                 }
             },
@@ -127,7 +136,12 @@ fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
         onPauseOrDispose { }
     }
 
-    BackHandler(enabled = route != SettingsRoute.Root) { route = SettingsRoute.Root }
+    BackHandler(enabled = route != SettingsRoute.Root) {
+        route = if (route is SettingsRoute.HabitEdit) SettingsRoute.Habits else SettingsRoute.Root
+    }
+
+    val habitsViewModel: HabitsViewModel = hiltViewModel()
+    val habitsState by habitsViewModel.state.collectAsStateWithLifecycle()
 
     // Снекбар висит над всей вкладкой, а не над корневым экраном. Сообщения
     // («шлагбаум сохранён», «нет разрешения на локацию», исход проверочного
@@ -150,6 +164,7 @@ fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
             onCarBluetooth = viewModel::setCarBluetooth,
             onCarPlace = viewModel::setCarPlace,
             onOpenJournal = { route = SettingsRoute.Journal },
+            onOpenHabits = { route = SettingsRoute.Habits },
             onOpenBarrier = { route = SettingsRoute.BarrierEdit(it.id) },
             onOpenHome = { route = SettingsRoute.Home },
             onOpenCollection = { route = SettingsRoute.Collection },
@@ -181,6 +196,39 @@ fun SettingsScreen(modifier: Modifier = Modifier, onOpenCar: () -> Unit = {}) {
         // Журнал проездов (§4.5) — вторичный экран: разметка необязательна,
         // поэтому отдельной вкладки у него больше нет.
         SettingsRoute.Journal -> HistoryScreen(onBack = { route = SettingsRoute.Root })
+
+        SettingsRoute.Habits -> SubScreenScaffold(
+            title = "Привычки",
+            onBack = { route = SettingsRoute.Root },
+        ) { contentModifier ->
+            HabitsListContent(
+                modifier = contentModifier,
+                habits = habitsState.habits,
+                onOpen = { route = SettingsRoute.HabitEdit(it?.id) },
+            )
+        }
+
+        is SettingsRoute.HabitEdit -> {
+            val habit = current.habitId?.let { id -> habitsState.habits.firstOrNull { it.id == id } }
+            SubScreenScaffold(
+                title = habit?.name ?: "Новая привычка",
+                onBack = { route = SettingsRoute.Habits },
+            ) { contentModifier ->
+                HabitEditContent(
+                    modifier = contentModifier,
+                    habit = habit,
+                    onPickCurrent = habitsViewModel::currentLocation,
+                    onSave = {
+                        habitsViewModel.save(it)
+                        route = SettingsRoute.Habits
+                    },
+                    onDelete = {
+                        habitsViewModel.delete(it)
+                        route = SettingsRoute.Habits
+                    },
+                )
+            }
+        }
 
         SettingsRoute.Permissions -> SubScreenScaffold(
             title = "Разрешения",
@@ -243,6 +291,7 @@ private fun SettingsContent(
     onCarBluetooth: (BluetoothDeviceOption?) -> Unit,
     onCarPlace: (String) -> Unit,
     onOpenJournal: () -> Unit,
+    onOpenHabits: () -> Unit,
     onOpenBarrier: (Barrier) -> Unit,
     onOpenHome: () -> Unit,
     onOpenCollection: () -> Unit,
@@ -363,6 +412,15 @@ private fun SettingsContent(
                     onCarPlace = onCarPlace,
                     onOpenCar = onOpenCar,
                 )
+
+                GroupCaption("Поездки")
+                SettingsGroup {
+                    NavGroupRow(
+                        title = "Привычки",
+                        value = "маршрут по кнопке",
+                        onClick = onOpenHabits,
+                    )
+                }
 
                 GroupCaption("Геофенсы")
                 SettingsGroup {
@@ -629,6 +687,7 @@ private fun SettingsPreview() {
             onCarBluetooth = {},
             onCarPlace = {},
             onOpenJournal = {},
+            onOpenHabits = {},
             onOpenBarrier = {},
             onOpenHome = {},
             onOpenCollection = {},
