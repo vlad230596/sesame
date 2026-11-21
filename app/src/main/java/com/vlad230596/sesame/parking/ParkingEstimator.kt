@@ -35,6 +35,14 @@ data class EstimatorParams(
     val maxAccuracyMeters: Float = 50f,
     /** Быстрее — ещё едем: последний такой фикс — конец езды. */
     val drivingSpeedMps: Float = 3f,
+    /**
+     * Конец езды — последний фикс серии из стольких фиксов езды подряд. Одиночный
+     * фикс быстрее порога бывает и на стоянке: fused полминуты держит точку на
+     * месте, а потом «отпускает» её скачком со скоростью 3 м/с (выгрузка
+     * 16.11, 19:45). Такой выброс выбрасывал всю настоящую стоянку из оценки.
+     * Серии нет вовсе (редкие фиксы без зоны) — берётся последний фикс езды.
+     */
+    val minDrivingRun: Int = 3,
     /** Медленнее — стоим. */
     val stopSpeedMps: Float = 0.7f,
     /**
@@ -77,7 +85,9 @@ data class ParkingEstimate(
  * Одна фиксация в момент отключения — слабое место: Bluetooth машины держится
  * ещё 30–40 с после остановки, фиксация приходит с задержкой, и человек может
  * уже идти. Поэтому:
- * - конец езды — последний фикс быстрее [EstimatorParams.drivingSpeedMps];
+ * - конец езды — последний фикс серии из [EstimatorParams.minDrivingRun] фиксов
+ *   быстрее [EstimatorParams.drivingSpeedMps] (одиночный выброс скорости на
+ *   стоянке концом езды не считается);
  * - стоянка — фиксы после него медленнее [EstimatorParams.stopSpeedMps] (без
  *   скорости — по смещению от соседнего фикса), пока смещение от первого фикса
  *   стоянки не превысит [EstimatorParams.walkAwayMeters];
@@ -104,7 +114,9 @@ class ParkingEstimator(private val params: EstimatorParams = EstimatorParams()) 
     }
 
     private fun fromTail(fixes: List<TailFix>, disconnectedAt: Long, raw: TailFix?): ParkingEstimate? {
-        val driveEnd = fixes.indices.lastOrNull { isDriving(fixes, it) } ?: return null
+        val driveEnd = lastSustainedDriving(fixes)
+            ?: fixes.indices.lastOrNull { isDriving(fixes, it) }
+            ?: return null
 
         // Между концом езды и стоянкой бывают фиксы торможения — их пропускаем.
         val stopStart = (driveEnd + 1 until fixes.size).firstOrNull { isStopped(fixes, it) } ?: return null
@@ -158,6 +170,20 @@ class ParkingEstimator(private val params: EstimatorParams = EstimatorParams()) 
             rawAccuracyMeters = raw.accuracyMeters,
         )
         return ParkingEstimate(car, tailFixes, stopToDisconnectMillis = null, rawToEstMeters = 0.0)
+    }
+
+    /** Последний фикс последней серии из [EstimatorParams.minDrivingRun] фиксов езды подряд. */
+    private fun lastSustainedDriving(fixes: List<TailFix>): Int? {
+        var run = 0
+        for (i in fixes.indices.reversed()) {
+            if (isDriving(fixes, i)) {
+                run++
+                if (run >= params.minDrivingRun) return i + run - 1
+            } else {
+                run = 0
+            }
+        }
+        return null
     }
 
     private fun isDriving(fixes: List<TailFix>, i: Int): Boolean {

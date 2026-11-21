@@ -122,6 +122,27 @@ class ParkingEstimatorTest {
         assertEquals(44 * 1_000L, est.stopToDisconnectMillis)
     }
 
+    /**
+     * Выгрузка 16.11, 19:45: fused полминуты держал точку стоянки, потом выдал
+     * фикс со скоростью 3,03 м/с и сдвинул точку на 7 м. Прежде этот фикс
+     * считался концом езды, и в стоянку попадали только два фикса после него.
+     */
+    @Test
+    fun `одиночный выброс скорости на стоянке — не конец езды`() {
+        val drive = driveNorth()
+        val endSec = drive.size - 1
+        val stop = stopAt(endSec, 30)
+        val spike = at(endSec + 31, north = 2.0, speed = 3.03f)
+        val shifted = (32..33).map { at(endSec + it, north = 7.0, speed = 0f) }
+        val disconnectedAt = T0 + (endSec + 34) * 1_000L
+
+        val est = requireNotNull(estimator.estimate(drive + stop + spike + shifted, disconnectedAt, raw = null))
+        assertEquals(ParkingSource.TAIL, est.car.source)
+        // 30 фиксов у 0 и 2 у 7 м: точка у настоящей стоянки, а не у сдвинутой.
+        assertTrue("north ${north(est.car.lat)}", north(est.car.lat) < 1.0)
+        assertEquals(33 * 1_000L, est.stopToDisconnectMillis)
+    }
+
     @Test
     fun `фиксы без скорости — езда и стоянка по смещению между фиксами`() {
         val drive = driveNorth(withSpeed = false, withBearing = false)

@@ -38,6 +38,7 @@ import com.vlad230596.sesame.parking.ParkedCar
 import com.vlad230596.sesame.parking.ParkingAnchor
 import com.vlad230596.sesame.parking.ParkingSource
 import com.vlad230596.sesame.parking.SpotResult
+import com.vlad230596.sesame.ui.common.NoticeBanner
 import com.vlad230596.sesame.ui.common.SesameButton
 import com.vlad230596.sesame.ui.common.SesameCard
 import com.vlad230596.sesame.ui.common.SesameField
@@ -98,6 +99,8 @@ fun CarScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 spot = state.spot,
                 now = state.now,
                 loaded = state.loaded,
+                collectorRunning = state.collectorRunning,
+                onStartCollector = viewModel::startCollector,
                 modifier = contentModifier,
             )
 
@@ -216,8 +219,27 @@ private fun SpotCard(
     now: Long,
     loaded: Boolean,
     modifier: Modifier = Modifier,
+    collectorRunning: Boolean = true,
+    onStartCollector: () -> Unit = {},
 ) {
     SesameCard(modifier = modifier) {
+        // Без сбора новые парковки не записываются: на карте остаётся последняя
+        // известная, и выглядит она так же, как свежая. Плашка — первой строкой,
+        // до ответа «у Ш2», чтобы его не приняли за текущее положение.
+        if (loaded && !collectorRunning) {
+            NoticeBanner(
+                title = "Сбор остановлен",
+                text = "Новые парковки не записываются. " +
+                    (car?.takeIf { it.at > 0 }?.let { "Ниже — парковка ${formatDateTime(it.at)}, машину могли переставить." } ?: ""),
+            )
+            TextButton(onClick = onStartCollector) {
+                Text(
+                    "Запустить сбор",
+                    style = SesameText.Caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = Palette.Amber,
+                )
+            }
+        }
         if (car == null) {
             Text(
                 text = if (loaded) "Парковок ещё не было" else "Загружаю…",

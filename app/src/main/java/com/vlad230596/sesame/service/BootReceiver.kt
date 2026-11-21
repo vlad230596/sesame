@@ -27,6 +27,7 @@ class BootReceiver : BroadcastReceiver() {
     @InstallIn(SingletonComponent::class)
     interface BootEntryPoint {
         fun journal(): CollectorJournal
+        fun autostart(): CollectorAutostart
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -36,7 +37,10 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             -> {
                 logBoot(context, intent.action.orEmpty())
-                CollectorService.start(context)
+                // Остановленный владельцем сбор не поднимаем и после перезагрузки.
+                EntryPointAccessors.fromApplication(context.applicationContext, BootEntryPoint::class.java)
+                    .autostart()
+                    .ensureRunning(intent.action.orEmpty())
             }
         }
     }

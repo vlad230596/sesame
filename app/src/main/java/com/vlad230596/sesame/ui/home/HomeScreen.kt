@@ -131,7 +131,9 @@ private fun carLine(car: CarUiState): String? {
     if (!car.loaded) return null
     val parked = car.car ?: return "парковок ещё не было"
     val ago = if (parked.at > 0) formatAgoShort(parked.at, car.now) else null
-    return listOfNotNull(car.spotPhrase, ago).joinToString(", ").ifEmpty { "на карте" }
+    // Без сбора это последняя известная парковка, а не текущая.
+    val stale = if (car.collectorRunning) null else "сбор остановлен"
+    return listOfNotNull(car.spotPhrase, ago, stale).joinToString(", ").ifEmpty { "на карте" }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

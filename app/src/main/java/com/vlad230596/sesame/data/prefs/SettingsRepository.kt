@@ -97,6 +97,11 @@ data class SesameSettings(
     val carParkedLon: Double? = null,
     val carParkedAccuracyMeters: Float? = null,
     val carParkedAt: Long? = null,
+    /**
+     * Сбор остановлен кнопкой «Остановить». Только в этом случае сервис не
+     * поднимается сам: при старте процесса, после перезагрузки и обновления.
+     */
+    val collectionStoppedByUser: Boolean = false,
 ) {
     companion object {
         const val DEFAULT_CANCEL_TIMEOUT_SECONDS = 3
@@ -185,6 +190,7 @@ class SettingsRepository @Inject constructor(
         val CarParkedLon = doublePreferencesKey("car_parked_lon")
         val CarParkedAccuracy = floatPreferencesKey("car_parked_accuracy")
         val CarParkedAt = longPreferencesKey("car_parked_at")
+        val CollectionStoppedByUser = booleanPreferencesKey("collection_stopped_by_user")
     }
 
     val settings: Flow<SesameSettings> = context.settingsDataStore.data.map { it.toSettings() }
@@ -289,6 +295,10 @@ class SettingsRepository @Inject constructor(
         it[Keys.CarParkedAt] = at
     }
 
+    suspend fun setCollectionStoppedByUser(value: Boolean) = edit {
+        it[Keys.CollectionStoppedByUser] = value
+    }
+
     /** Сброс только параметров сбора (§4.4) — остальные настройки не трогает. */
     suspend fun resetCollectionParams() = edit {
         it.remove(Keys.LocationInterval)
@@ -330,6 +340,7 @@ class SettingsRepository @Inject constructor(
             carParkedLon = this[Keys.CarParkedLon],
             carParkedAccuracyMeters = this[Keys.CarParkedAccuracy],
             carParkedAt = this[Keys.CarParkedAt],
+            collectionStoppedByUser = this[Keys.CollectionStoppedByUser] ?: false,
         )
     }
 }

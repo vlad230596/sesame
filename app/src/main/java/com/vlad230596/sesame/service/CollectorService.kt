@@ -33,6 +33,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -91,11 +94,13 @@ class CollectorService : android.app.Service() {
         }
 
         ensureCollecting()
+        mutableRunning.value = true
         return START_STICKY
     }
 
     override fun onDestroy() {
         Log.i(TAG, "Сервис останавливается")
+        mutableRunning.value = false
         guardJob?.cancel()
         guardJob = null
         journal.log(LogEventType.SERVICE_STOPPED)
@@ -265,6 +270,17 @@ class CollectorService : android.app.Service() {
 
         const val ACTION_START = "com.vlad230596.sesame.action.START_COLLECTOR"
         const val ACTION_STOP = "com.vlad230596.sesame.action.STOP_COLLECTOR"
+
+        private val mutableRunning = MutableStateFlow(false)
+
+        /**
+         * Идёт ли сбор — для главного экрана. [start] и [stop] асинхронны: сервис
+         * поднимается и гасится уже после возврата из вызова, поэтому разовый
+         * опрос сразу после нажатия видел прежнее состояние, и кнопка
+         * «Остановить» казалась неработающей. Сервис живёт в процессе
+         * приложения, так что флага в памяти достаточно.
+         */
+        val running: StateFlow<Boolean> = mutableRunning.asStateFlow()
 
         fun start(context: Context) = send(context, ACTION_START)
 

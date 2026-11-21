@@ -1,8 +1,6 @@
 package com.vlad230596.sesame.ui.home
 
-import android.app.ActivityManager
 import android.content.Context
-import androidx.core.content.getSystemService
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vlad230596.sesame.call.CallBarrierRequest
@@ -89,7 +87,6 @@ class HomeViewModel @Inject constructor(
     private data class Local(
         val countdown: CountdownState? = null,
         val now: Long = System.currentTimeMillis(),
-        val serviceRunning: Boolean = false,
         val missingPermissions: List<PermissionSpec> = emptyList(),
         val message: String? = null,
     )
@@ -123,10 +120,11 @@ class HomeViewModel @Inject constructor(
         base.copy(
             countdown = l.countdown,
             now = l.now,
-            serviceRunning = l.serviceRunning,
             missingPermissions = l.missingPermissions,
             message = l.message,
         )
+    }.combine(CollectorService.running) { st, running ->
+        st.copy(serviceRunning = running)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
     init {
@@ -141,14 +139,12 @@ class HomeViewModel @Inject constructor(
         refresh()
     }
 
-    /** Вызывается при каждом возврате на экран: разрешения и сервис могли измениться. */
+    /**
+     * Вызывается при каждом возврате на экран: разрешения могли измениться.
+     * Состояние сервиса сюда не входит — оно приходит из [CollectorService.running].
+     */
     fun refresh() {
-        local.update {
-            it.copy(
-                serviceRunning = isCollectorRunning(),
-                missingPermissions = permissionsChecker.missing(),
-            )
-        }
+        local.update { it.copy(missingPermissions = permissionsChecker.missing()) }
     }
 
     fun dismissMessage() = local.update { it.copy(message = null) }
@@ -245,22 +241,16 @@ class HomeViewModel @Inject constructor(
     // --- Сервис сбора (§9) --------------------------------------------------------
 
     fun startService() {
+        viewModelScope.launch { settingsRepository.setCollectionStoppedByUser(false) }
         runCatching { CollectorService.start(context) }
             .onFailure { local.update { st -> st.copy(message = "Сервис не запустился: ${it.message}") } }
-        refresh()
     }
 
+    /** Решение владельца запоминается: сам по себе сбор после этого не поднимется. */
     fun stopService() {
+        viewModelScope.launch { settingsRepository.setCollectionStoppedByUser(true) }
         runCatching { CollectorService.stop(context) }
-        refresh()
     }
-
-    @Suppress("DEPRECATION")
-    private fun isCollectorRunning(): Boolean = runCatching {
-        context.getSystemService<ActivityManager>()
-            ?.getRunningServices(Int.MAX_VALUE)
-            ?.any { it.service.className == CollectorService::class.java.name }
-    }.getOrNull() ?: false
 
     private companion object {
         /** 60 мс — прогресс-бар идёт плавно, а лишней работы почти нет. */

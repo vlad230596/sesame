@@ -1,5 +1,6 @@
 package com.vlad230596.sesame.ui.car
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vlad230596.sesame.data.BarrierRepository
@@ -13,7 +14,9 @@ import com.vlad230596.sesame.parking.ParkingAnchor
 import com.vlad230596.sesame.parking.ParkingSource
 import com.vlad230596.sesame.parking.SpotClassifier
 import com.vlad230596.sesame.parking.SpotResult
+import com.vlad230596.sesame.service.CollectorService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -38,6 +41,12 @@ data class CarUiState(
     val home: Pair<Double, Double>? = null,
     val now: Long = System.currentTimeMillis(),
     val loaded: Boolean = false,
+    /**
+     * Идёт ли сбор. Без него новые парковки не записываются, и на карте остаётся
+     * последняя известная — экран обязан это сказать, а не показывать её как
+     * текущую (17.11–21.11 сбор лежал, а точка 16.11 выглядела текущей).
+     */
+    val collectorRunning: Boolean = true,
 ) {
     /** Метки, от которых строится ответ: свои или, пока их нет, шлагбаумы. */
     val effectiveAnchors: List<ParkingAnchor>
@@ -62,10 +71,11 @@ data class CarUiState(
  */
 @HiltViewModel
 class CarViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val parking: ParkingRepository,
     private val journal: CollectorJournal,
     barrierRepository: BarrierRepository,
-    settingsRepository: SettingsRepository,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     private val clock = MutableStateFlow(System.currentTimeMillis())
@@ -102,6 +112,8 @@ class CarViewModel @Inject constructor(
             now = now,
             loaded = true,
         )
+    }.combine(CollectorService.running) { st, running ->
+        st.copy(collectorRunning = running)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CarUiState())
 
     init {
@@ -112,6 +124,12 @@ class CarViewModel @Inject constructor(
                 clock.value = System.currentTimeMillis()
             }
         }
+    }
+
+    /** «Запустить сбор» с плашки: то же, что кнопка на главном экране. */
+    fun startCollector() {
+        viewModelScope.launch { settingsRepository.setCollectionStoppedByUser(false) }
+        CollectorService.start(context)
     }
 
     /**
