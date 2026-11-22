@@ -171,6 +171,13 @@ dependencies {
 
     // Юнит-тесты чистой логики (подсказка у шлагбаума)
     testImplementation(libs.junit)
+
+    // UI-тесты (androidTest): налезание подписей, карта поверх карточки, выбор точки
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 
 // Fail release packaging in CI when no keystore was injected, instead of quietly

@@ -22,6 +22,7 @@ import com.vlad230596.sesame.events.ActivityRecognitionWatcher
 import com.vlad230596.sesame.events.GeofenceWatcher
 import com.vlad230596.sesame.events.SystemEventWatcher
 import com.vlad230596.sesame.logging.DataFileStore
+import com.vlad230596.sesame.logging.StorageRetention
 import com.vlad230596.sesame.logging.JournalPublisher
 import com.vlad230596.sesame.prompt.PromptController
 import com.vlad230596.sesame.sensors.PassiveSensorCollector
@@ -69,6 +70,8 @@ class CollectorService : android.app.Service() {
     @Inject lateinit var activityRecognition: ActivityRecognitionWatcher
 
     @Inject lateinit var prompts: PromptController
+
+    @Inject lateinit var retention: StorageRetention
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var guardJob: Job? = null
@@ -132,6 +135,8 @@ class CollectorService : android.app.Service() {
                 journal.log(LogEventType.PASSIVE_DAY_ROTATED, mapOf("publishedDir" to dir))
             }
             scope.launch { journalPublisher.publishDay(finishedDate) }
+            // Вчерашние сутки стали «старыми» — их пора проредить (§7).
+            scope.launch { retention.run() }
         }
         // Журнал и метки живут в Room — в `Documents/Sesame/journal/` они
         // попадают только выгрузкой (§7). Обработчики вызываются из потока записи,
@@ -141,6 +146,11 @@ class CollectorService : android.app.Service() {
         // Вся история при каждом старте: догоняет события, накопленные до
         // появления выгрузки, и сутки, пропущенные, пока сервис лежал.
         scope.launch { journalPublisher.publishAll() }
+        // Хранилище — в лимит (§7). С задержкой: старт сбора важнее.
+        scope.launch {
+            delay(RETENTION_START_DELAY_MILLIS)
+            retention.run()
+        }
 
         // §4.4. Журнал событий пишется всегда и стоит почти ноль, поэтому он
         // поднимается вместе со сбором и не зависит от разрешений: чего не
@@ -264,6 +274,9 @@ class CollectorService : android.app.Service() {
 
         /** Повторная регистрация дешёвая, но чаще раза в 10 с она не нужна. */
         private const val GUARD_INTERVAL_MILLIS = 10_000L
+
+        /** Чистка хранилища — через минуту после старта сбора, не мешая ему подняться. */
+        private const val RETENTION_START_DELAY_MILLIS = 60_000L
 
         const val CHANNEL_ID = "sesame_collector"
         const val NOTIFICATION_ID = 1

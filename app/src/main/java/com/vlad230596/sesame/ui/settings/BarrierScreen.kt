@@ -1,5 +1,7 @@
 package com.vlad230596.sesame.ui.settings
 
+import java.util.Locale
+import com.vlad230596.sesame.ui.common.MapPickerDialog
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -248,6 +250,20 @@ internal fun GeofenceCard(
     modifier: Modifier = Modifier,
     title: String = "Геофенс",
 ) {
+    var picking by remember { mutableStateOf(false) }
+    if (picking) {
+        val current = lat.trim().toDoubleOrNull()?.let { la -> lon.trim().toDoubleOrNull()?.let { la to it } }
+        MapPickerDialog(
+            title = "$title: точка на карте",
+            initial = current,
+            onPick = { pickedLat, pickedLon ->
+                onLat(String.format(Locale.US, "%.6f", pickedLat))
+                onLon(String.format(Locale.US, "%.6f", pickedLon))
+                picking = false
+            },
+            onDismiss = { picking = false },
+        )
+    }
     SesameSurface(
         modifier = modifier.fillMaxWidth(),
         color = Palette.Surface,
@@ -292,6 +308,19 @@ internal fun GeofenceCard(
                             fontWeight = FontWeight.SemiBold,
                         ),
                         onClick = onPickCurrent,
+                    )
+                    SesameButton(
+                        text = "На карте",
+                        container = Palette.SurfaceHigh,
+                        content = Palette.TextPrimary,
+                        border = Palette.BorderStrong,
+                        height = 40.dp,
+                        corner = 13.dp,
+                        style = SesameText.Caption.copy(
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                        onClick = { picking = true },
                     )
                 }
             }

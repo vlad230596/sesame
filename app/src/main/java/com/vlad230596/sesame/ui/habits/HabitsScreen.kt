@@ -1,5 +1,6 @@
 package com.vlad230596.sesame.ui.habits
 
+import com.vlad230596.sesame.ui.common.MapPickerDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -130,6 +131,7 @@ internal fun HabitEditContent(
     var to by remember(habit?.id) { mutableStateOf(habit?.let { formatMinutes(it.toMinutes) } ?: "19:30") }
     var days by remember(habit?.id) { mutableStateOf(habit?.days ?: emptySet()) }
     var enabled by remember(habit?.id) { mutableStateOf(habit?.enabled ?: true) }
+    var pickingOnMap by remember { mutableStateOf(false) }
 
     val point = parseCoordinates(coords)
     val fromMinutes = parseMinutes(from)
@@ -155,18 +157,39 @@ internal fun HabitEditContent(
             mono = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
         )
-        SesameButton(
-            text = "Текущее место",
-            modifier = Modifier.fillMaxWidth(),
-            container = Palette.SurfaceHigh,
-            content = Tones.TextSoft,
-            border = Palette.BorderStrong,
-            onClick = {
-                onPickCurrent { lat, lon ->
-                    if (lat != null && lon != null) coords = String.format(Locale.US, "%.6f, %.6f", lat, lon)
-                }
-            },
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceS)) {
+            SesameButton(
+                text = "Текущее место",
+                modifier = Modifier.weight(1f),
+                container = Palette.SurfaceHigh,
+                content = Tones.TextSoft,
+                border = Palette.BorderStrong,
+                onClick = {
+                    onPickCurrent { lat, lon ->
+                        if (lat != null && lon != null) coords = String.format(Locale.US, "%.6f, %.6f", lat, lon)
+                    }
+                },
+            )
+            SesameButton(
+                text = "На карте",
+                modifier = Modifier.weight(1f),
+                container = Palette.SurfaceHigh,
+                content = Tones.TextSoft,
+                border = Palette.BorderStrong,
+                onClick = { pickingOnMap = true },
+            )
+        }
+        if (pickingOnMap) {
+            MapPickerDialog(
+                title = name.ifBlank { "Место привычки" },
+                initial = point,
+                onPick = { lat, lon ->
+                    coords = String.format(Locale.US, "%.6f, %.6f", lat, lon)
+                    pickingOnMap = false
+                },
+                onDismiss = { pickingOnMap = false },
+            )
+        }
 
         Text("Дни", style = SesameText.Caption.copy(fontWeight = FontWeight.SemiBold), color = Palette.TextMuted)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

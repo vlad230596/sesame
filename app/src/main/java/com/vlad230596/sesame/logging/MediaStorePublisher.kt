@@ -74,7 +74,7 @@ class MediaStorePublisher @Inject constructor(
         return files.count { publish(it, relativeDir) }
     }
 
-    /** Занятый объём в `Documents/Sesame/` — для плашки «занято X из 10 ГБ» (§4.7, §7). */
+    /** Занятый объём в `Documents/Sesame/` — для плашки «занято X из 1 ГБ» (§4.7, §7). */
     fun usedBytes(): Long = runCatching {
         var total = 0L
         context.contentResolver.query(

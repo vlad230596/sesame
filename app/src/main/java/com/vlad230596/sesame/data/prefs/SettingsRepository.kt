@@ -149,8 +149,12 @@ data class SesameSettings(
         const val MIN_GEOFENCE_RADIUS_METERS = 50
         const val MAX_GEOFENCE_RADIUS_METERS = 2_000
 
-        /** §7: жёсткий лимит хранилища. */
-        const val STORAGE_LIMIT_BYTES = 10L * 1024 * 1024 * 1024
+        /**
+         * §7: жёсткий лимит хранилища. Было 10 ГБ; 1 ГБ хватает на месяцы, если
+         * писать датчики на заказанной частоте и прореживать старые сутки
+         * (StorageRetention).
+         */
+        const val STORAGE_LIMIT_BYTES = 1L * 1024 * 1024 * 1024
     }
 }
 

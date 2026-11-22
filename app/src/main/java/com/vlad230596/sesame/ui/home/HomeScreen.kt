@@ -689,7 +689,7 @@ private fun HomePreview() {
             state = HomeUiState(
                 barriers = previewBarriers,
                 lastEventAt = System.currentTimeMillis() - 4 * 60_000,
-                usedBytes = 2_400_000_000,
+                usedBytes = 340_000_000,
                 serviceRunning = true,
             ),
             onBarrierPressed = {},

@@ -17,6 +17,7 @@ import com.vlad230596.sesame.logging.DataFileStore
 import com.vlad230596.sesame.logging.DataPaths
 import com.vlad230596.sesame.logging.GzipCsvWriter
 import com.vlad230596.sesame.logging.ManifestDraft
+import com.vlad230596.sesame.logging.SampleDecimator
 import com.vlad230596.sesame.logging.Manifests
 import com.vlad230596.sesame.logging.SensorStreams
 import com.vlad230596.sesame.logging.WriteScope
@@ -74,6 +75,12 @@ class PassiveSensorCollector @Inject constructor(
      * потоке вызывающего, а читаются в потоке доставки событий датчиков.
      */
     private val streamKeys = ConcurrentHashMap<Int, String>()
+
+    /**
+     * Тип датчика → фильтр частоты записи. Заказанная частота для Android только
+     * пожелание: см. [SampleDecimator]. Детектор движения видит все отсчёты.
+     */
+    private val decimators = ConcurrentHashMap<Int, SampleDecimator>()
 
     private val registered = CopyOnWriteArrayList<Sensor>()
     private var locationWriter: LocationStreamWriter? = null
@@ -149,6 +156,7 @@ class PassiveSensorCollector @Inject constructor(
             // Ключ кладётся до подписки: первый отсчёт может прийти раньше, чем
             // вернётся registerListener, и терять его незачем.
             streamKeys[sensor.type] = request.streamKey
+            decimators[sensor.type] = SampleDecimator(SampleDecimator.intervalNanosForHz(request.hz))
             val ok = runCatching {
                 manager.registerListener(this, sensor, delayUs, latencyUs, sensorHandler)
             }.getOrDefault(false)
@@ -157,6 +165,7 @@ class PassiveSensorCollector @Inject constructor(
                 infos.put(Manifests.sensorInfo(sensor, request.streamKey, delayUs, latencyUs))
             } else {
                 streamKeys.remove(sensor.type)
+                decimators.remove(sensor.type)
                 missing += request.streamKey
                 journal.log(
                     LogEventType.COLLECTION_ERROR,
@@ -243,6 +252,7 @@ class PassiveSensorCollector @Inject constructor(
         if (event.sensor.type == Sensor.TYPE_ACCELEROMETER && event.values.size >= 3) {
             motion.onAccelerometer(event.timestamp, event.values[0], event.values[1], event.values[2])
         }
+        if (decimators[event.sensor.type]?.accept(event.timestamp) == false) return
         store.writeSensor(
             scope = WriteScope.PASSIVE,
             key = key,

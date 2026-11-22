@@ -127,4 +127,7 @@ enum class LogEventType {
      * выход, а не вход реплея.
      */
     CAR_POSITION_CORRECTED,
+
+    /** Хранилище ужато до лимита (§7): что прорежено и что удалено. */
+    STORAGE_TRIMMED,
 }

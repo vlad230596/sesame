@@ -679,7 +679,7 @@ private fun SettingsPreview() {
                 settings = SesameSettings(),
                 missingPermissions = 1,
                 missingHint = "Локация в фоне",
-                usedBytes = 2_400_000_000,
+                usedBytes = 340_000_000,
             ),
             onCancelTimeout = {},
             onPhoneAccount = {},

@@ -25,6 +25,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -65,12 +67,6 @@ fun CarScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    var mode by rememberSaveable { mutableStateOf(CarMapMode.VIEW) }
-    var pending by remember { mutableStateOf<GeoPoint?>(null) }
-    var centerRequest by remember { mutableIntStateOf(0) }
-    var newAnchorAt by remember { mutableStateOf<GeoPoint?>(null) }
-    var editedAnchor by remember { mutableStateOf<ParkingAnchor?>(null) }
-
     // Разрешение могли выдать или отозвать, пока экран был в фоне.
     var locationPermitted by remember { mutableStateOf(false) }
     LifecycleResumeEffect(Unit) {
@@ -78,6 +74,38 @@ fun CarScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             .any { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
         onPauseOrDispose { }
     }
+
+    CarScreenContent(
+        state = state,
+        locationPermitted = locationPermitted,
+        onBack = onBack,
+        onStartCollector = viewModel::startCollector,
+        onCorrectPosition = viewModel::correctPosition,
+        onAddAnchor = viewModel::addAnchor,
+        onRenameAnchor = viewModel::renameAnchor,
+        onDeleteAnchor = viewModel::deleteAnchor,
+        modifier = modifier,
+    )
+}
+
+/** Экран без ViewModel: его же собирают UI-тесты с подставным состоянием. */
+@Composable
+internal fun CarScreenContent(
+    state: CarUiState,
+    locationPermitted: Boolean,
+    onBack: () -> Unit,
+    onStartCollector: () -> Unit,
+    onCorrectPosition: (Double, Double) -> Unit,
+    onAddAnchor: (String, Double, Double) -> Unit,
+    onRenameAnchor: (String, String) -> Unit,
+    onDeleteAnchor: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var mode by rememberSaveable { mutableStateOf(CarMapMode.VIEW) }
+    var pending by remember { mutableStateOf<GeoPoint?>(null) }
+    var centerRequest by remember { mutableIntStateOf(0) }
+    var newAnchorAt by remember { mutableStateOf<GeoPoint?>(null) }
+    var editedAnchor by remember { mutableStateOf<ParkingAnchor?>(null) }
 
     fun leaveMode() {
         mode = CarMapMode.VIEW
@@ -100,15 +128,19 @@ fun CarScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 now = state.now,
                 loaded = state.loaded,
                 collectorRunning = state.collectorRunning,
-                onStartCollector = viewModel::startCollector,
-                modifier = contentModifier,
+                onStartCollector = onStartCollector,
+                modifier = contentModifier.testTag(CarScreenTags.SPOT_CARD),
             )
 
+            // Обрезка обязательна: osmdroid во время щипка масштабирует холст
+            // целиком и без неё рисует тайлы поверх карточки с ответом.
             Box(
                 Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(top = Dimens.StackGap),
+                    .padding(top = Dimens.StackGap)
+                    .clipToBounds()
+                    .testTag(CarScreenTags.MAP),
             ) {
                 CarMap(
                     state = state,
@@ -173,7 +205,7 @@ fun CarScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 onEditAnchors = { mode = CarMapMode.EDIT_ANCHORS },
                 onCancel = ::leaveMode,
                 onConfirmMove = {
-                    pending?.let { viewModel.correctPosition(it.latitude, it.longitude) }
+                    pending?.let { onCorrectPosition(it.latitude, it.longitude) }
                     leaveMode()
                 },
                 modifier = contentModifier.padding(vertical = Dimens.StackGap),
@@ -186,7 +218,7 @@ fun CarScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             title = "Новая метка",
             initialName = "",
             onSave = { name ->
-                viewModel.addAnchor(name, point.latitude, point.longitude)
+                onAddAnchor(name, point.latitude, point.longitude)
                 newAnchorAt = null
             },
             onDelete = null,
@@ -199,16 +231,22 @@ fun CarScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             title = "Метка «${anchor.name}»",
             initialName = anchor.name,
             onSave = { name ->
-                viewModel.renameAnchor(anchor.id, name)
+                onRenameAnchor(anchor.id, name)
                 editedAnchor = null
             },
             onDelete = {
-                viewModel.deleteAnchor(anchor.id)
+                onDeleteAnchor(anchor.id)
                 editedAnchor = null
             },
             onDismiss = { editedAnchor = null },
         )
     }
+}
+
+/** Метки для UI-тестов. */
+internal object CarScreenTags {
+    const val SPOT_CARD = "car.spotCard"
+    const val MAP = "car.map"
 }
 
 /** Ответ словами: где, когда, насколько точно и откуда известно. */
